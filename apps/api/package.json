@@ -1,0 +1,36 @@
+{
+  "name": "@flowforge/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "nest start --watch",
+    "build": "nest build",
+    "start": "node dist/main.js",
+    "lint": "eslint src test",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck:test": "tsc --noEmit -p tsconfig.test.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "vitest run test/health.e2e-spec.ts"
+  },
+  "dependencies": {
+    "@flowforge/contracts": "workspace:*",
+    "@nestjs/common": "12.3.2",
+    "@nestjs/core": "12.3.2",
+    "@nestjs/platform-express": "12.3.2",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "12.0.11",
+    "@nestjs/testing": "12.3.2",
+    "@swc/core": "1.16.21",
+    "@types/express": "5.0.6",
+    "@types/node": "26.6.6",
+    "@types/supertest": "7.2.1",
+    "supertest": "7.3.1",
+    "unplugin-swc": "2.0.0",
+    "vitest": "5.1.0"
+  }
+}

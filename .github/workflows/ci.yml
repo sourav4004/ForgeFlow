@@ -1,0 +1,62 @@
+name: FlowForge AI CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  quality-and-tests:
+    name: Quality & Test Pipeline
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check code formatting
+        run: pnpm run format:check
+
+      - name: Run root linter
+        run: pnpm run lint:root
+
+      - name: Run workspace linter
+        run: pnpm run lint
+
+      - name: Build workspace packages
+        run: pnpm run build
+
+      - name: Typecheck workspace packages
+        run: pnpm run typecheck
+
+      - name: Typecheck API tests
+        run: pnpm --filter @flowforge/api typecheck:test
+
+      - name: Typecheck worker tests
+        run: pnpm --filter @flowforge/worker typecheck:test
+
+      - name: Typecheck contracts tests
+        run: pnpm --filter @flowforge/contracts typecheck:test
+
+      - name: Run automated test suite
+        run: pnpm run test

@@ -2,10 +2,10 @@
   "name": "flowforge-ai",
   "version": "0.1.0",
   "private": true,
-  "packageManager": "pnpm@11.24.0",
+  "packageManager": "pnpm@12.16.1",
   "engines": {
-    "node": ">=26.0.0",
-    "pnpm": ">=10.0.0"
+    "node": ">=26.0.0 <27",
+    "pnpm": ">=12.0.0 <13"
   },
   "scripts": {
     "build": "turbo run build",
@@ -13,10 +13,20 @@
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
-    "clean": "turbo run clean"
+    "clean": "turbo run clean",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint:root": "eslint ."
   },
   "devDependencies": {
-    "turbo": "2.11.10"
+    "@eslint/js": "10.0.1",
+    "@next/eslint-plugin-next": "16.4.5",
+    "eslint": "10.14.0",
+    "eslint-config-prettier": "10.1.8",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "prettier": "3.9.10",
+    "turbo": "2.11.10",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.1"
   }
 }
-
