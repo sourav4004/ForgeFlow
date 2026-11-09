@@ -1,9 +1,9 @@
 # FlowForge AI — Engineering Progress Log
 
 **Document Version**: 1.0.0  
-**Current Milestone**: 1G  
-**Status**: ACTIVE LOG  
-**Last Updated**: 2026-11-04
+**Current Milestone**: 2B\
+**Status**: ACTIVE LOG\
+**Last Updated**: 2026-11-09
 
 ---
 
@@ -272,50 +272,347 @@ To maintain technical integrity and prevent false assumptions, verification evid
 
 ---
 
-## 3. Current Milestone
-
 ### Milestone 1G — GitHub Actions Continuous Integration Foundation
 
-- **Status**: `COMPLETED (Local Verification Passed; Remote CI Pending First Push)`
+- **Status**: `COMPLETED`
 - **Scope**: Author `.github/workflows/ci.yml` defining deterministic automated quality and test pipeline on `ubuntu-latest` with Node.js 26 and pnpm 12.
 - **Workflow Architecture**:
-  - **Triggers**: `push` (to `main`), `pull_request` (targeting `main`), and manual `workflow_dispatch`.
-  - **Permissions**: Strict least-privilege `contents: read` (no write permissions, zero secrets).
-  - **Actions & Setup**:
-    - `actions/checkout@v7` with `persist-credentials: false`
-    - `pnpm/action-setup@v6` automatically resolving version from root `package.json` (`packageManager: pnpm@12.16.1`)
-    - `actions/setup-node@v7` pinned via `node-version-file: '.nvmrc'` (Node 26) with `cache: 'pnpm'`
-  - **Single Job**: `quality-and-tests` on `ubuntu-latest` with `timeout-minutes: 20`
-  - **Sequential Pipeline Checks**:
-    1. `pnpm install --frozen-lockfile`
-    2. `pnpm run format:check`
-    3. `pnpm run lint:root`
-    4. `pnpm run lint`
-    5. `pnpm run build`
-    6. `pnpm run typecheck`
-    7. `pnpm --filter @flowforge/api typecheck:test`
-    8. `pnpm --filter @flowforge/worker typecheck:test`
-    9. `pnpm --filter @flowforge/contracts typecheck:test`
-    10. `pnpm run test`
+  - Triggers: `push` (to `main`), `pull_request` (targeting `main`), and manual `workflow_dispatch`.
+  - Permissions: Strict least-privilege `contents: read` (no write permissions, zero secrets).
+  - Actions: `actions/checkout@v7` (with `persist-credentials: false`), `pnpm/action-setup@v6` (version from `package.json`), `actions/setup-node@v7` (pinned via `.nvmrc` Node 26 with `cache: 'pnpm'`).
+  - Single Job: `quality-and-tests` on `ubuntu-latest` with `timeout-minutes: 20`.
+- **Verification**: `[AGENT-LOCAL]` / `[REMOTE-CI]`
+  - Local verification executed all 10 pipeline steps cleanly.
+  - Remote CI executed on GitHub Actions upon push and passed.
+- **Commit Status**: Committed in `ab5ca64` and pushed to GitHub.
+
+---
+
+### Milestone 1H — Final Phase 1 Verification and Developer-Controlled Commit
+
+- **Status**: `COMPLETED`
+- **Scope**: Final read-only engineering foundation audit, formatting normalization, developer-controlled staging, commit creation, and push.
+- **Commit Details**: Commit `ab5ca64 feat: complete phase 1 engineering foundation` on branch `main`.
+
+---
+
+## 3. Current Milestone
+
+### Milestone 2A-A — Basic Workflow Graph Contracts and Zod Runtime Schemas
+
+- **Status**: `COMPLETED`
+- **Scope**: Extend `@flowforge/contracts` with framework-independent Zod 4 runtime schemas and inferred TypeScript types for basic workflow graphs.
+- **Dependencies Added**:
+  - `zod@4.6.7` (production dependency in `@flowforge/contracts`)
+  - `vitest@5.1.0` (development dependency in `@flowforge/contracts`)
+- **Deliverables**:
+  - `WorkflowNodeTypeSchema` & `WorkflowNodeType`: Enum of 7 approved V1 node kinds (`INPUT`, `TRANSFORM`, `CONDITION`, `LLM`, `MCP_TOOL`, `APPROVAL`, `OUTPUT`).
+  - `WorkflowIdentifierSchema` & `WorkflowIdentifier`: Strict 1–128 character identifier validating non-empty, non-whitespace strings while strictly preserving identity without silent trimming or mutation.
+  - `WorkflowNodeSchema` & `WorkflowNode`: Validates `id`, `type`, `position` (finite `x`, `y` numbers), and `config` (`z.record(z.string(), z.json())`) with `.strict()`.
+  - `WorkflowEdgeSchema` & `WorkflowEdge`: Validates `id`, `source`, `target` with `.strict()`.
+  - `WorkflowGraphSchema` & `WorkflowGraph`: Validates `{ nodes, edges }` with `.strict()`, supporting empty graphs as draft canvases.
+  - Public exports in `@flowforge/contracts/src/index.ts`.
+- **Architectural Boundary**: Enforces strict structural schema validation only. Cycle detection, duplicate ID checking, reachability, and publishability are decoupled and deferred to Phase 2 graph core.
 - **Verification**: `[AGENT-LOCAL]`
-  - Workflow YAML syntax parsed and validated via Prettier AST parser.
-  - All 10 verification commands executed locally in exact sequence with exit code 0.
-- **Remote CI Status**: `NOT RUN` (Workflow file generated and locally validated; remote execution on GitHub Actions runners will trigger upon the first git push).
+  - 29 Vitest runtime schema tests passed (positive parsing, data preservation, negative rejections, structural vs. semantic boundaries).
+  - Existing compile-time type tests (`health-response.type-test.ts`) verified via `tsc --noEmit -p tsconfig.test.json`.
+  - Clean-build verified: deleting `packages/contracts/dist` and executing `pnpm test` successfully rebuilds ESM declarations and passes all tests.
+  - Negative test mutation verified: intentional test failure logged visible diff with nonzero exit code.
+  - Monorepo regression passed cleanly across API, worker, web, and root.
 - **Commit Status**: Preserved in working tree (developer-controlled commits).
+
+### Milestone 2A-B1a — INPUT Node Configuration Schema and Validation Tests
+
+- **Status**: `COMPLETED`
+- **Scope**: Implement standalone, strict Zod runtime configuration schema and inferred TypeScript types for the `INPUT` workflow node in `@flowforge/contracts`.
+- **Files Created**:
+  - `packages/contracts/src/workflow/node-configs/input-config.ts`
+  - `packages/contracts/test/input-config.spec.ts`
+- **Files Modified**:
+  - `packages/contracts/src/index.ts` (public barrel exports)
+- **Deliverables**:
+  - `InputFieldTypeSchema` & `InputFieldType`: Enum of 4 approved V1 field types (`string`, `number`, `boolean`, `json`).
+  - `InputFieldDefinitionSchema` & `InputFieldDefinition`: Strict definition requiring `name` (`WorkflowIdentifierSchema`), `type` (`InputFieldTypeSchema`), `required` (`boolean`), optional `description` (max 500 chars), and optional `defaultValue` (`z.json()`).
+  - Strict Default-Value Type Compatibility: Custom `.superRefine` validating that if `defaultValue` is present, it matches the declared field type (e.g., string for `string`, finite number for `number`, boolean for `boolean`, valid JSON for `json`), rejecting non-finite numbers (`NaN`, `Infinity`), non-JSON values, and explicit `undefined`.
+  - `InputNodeConfigSchema` & `InputNodeConfig`: Strict object requiring `fields` array (0 to 50 items), with `.superRefine` enforcing exact unique field names without silent mutation or normalization. Zero-field configurations (`fields: []`) are supported for parameterless triggers.
+  - Draft Compatibility: Preserved structural `WorkflowNodeSchema` allowing empty `{ config: {} }` during canvas drafting, while `InputNodeConfigSchema` strictly validates typed input configurations.
+- **Verification**: `[AGENT-LOCAL]`
+  - 29 Vitest runtime tests in `test/input-config.spec.ts` passing (8 positive, 16 negative, 4 boundary/draft compatibility, and compile-time type inference checks).
+  - 29 existing Vitest tests in `test/workflow-schema.spec.ts` continue passing without modification (58 total tests in contracts).
+  - TypeScript test typecheck (`typecheck:test`) and build clean.
+  - Full monorepo verification: `format:check`, `lint:root`, `lint`, `typecheck`, `build`, and `test` (63 total tests across api, worker, and contracts) all passing with exit code 0.
+- **Commit Status**: Preserved in working tree (developer-controlled commits).
+
+### Milestone 2A-B1b — Value Bindings and OUTPUT Node Configuration
+
+- **Status**: `COMPLETED`
+- **Scope**: Extend `@flowforge/contracts` with reusable, explicit value binding schemas (`LiteralBindingSchema`, `InputValueReferenceSchema`, `NodeOutputValueReferenceSchema`, `ValueReferenceSchema`, `ReferenceBindingSchema`, `ValueBindingSchema`) and the strict `OutputNodeConfigSchema`.
+- **Files Created**:
+  - `packages/contracts/src/workflow/primitives/value-binding.ts`
+  - `packages/contracts/src/workflow/node-configs/output-config.ts`
+  - `packages/contracts/test/value-binding.spec.ts`
+  - `packages/contracts/test/output-config.spec.ts`
+- **Files Modified**:
+  - `packages/contracts/src/index.ts` (public exports)
+  - `README.md`
+  - `DEVELOPMENT_PLAN.md`
+  - `CHANGELOG.md`
+- **Deliverables**:
+  - `PropertyPathSegmentSchema`: Bounded string (1–128 chars) validating path segments while preserving exact text, dots, spaces, and punctuation.
+  - `LiteralBindingSchema` & `LiteralBinding`: Strictly validates JSON values, rejecting undefined, functions, symbols, BigInt, and extra keys. Preserves literal string templates (e.g. `"{{input.value}}"`) without automatic interpolation.
+  - `InputValueReferenceSchema` & `InputValueReference`: Explicit reference with `source: 'input'`, `field: WorkflowIdentifier`, and bounded `path: string[]` (max 16 segments). Empty array targets whole input field.
+  - `NodeOutputValueReferenceSchema` & `NodeOutputValueReference`: Explicit reference with `source: 'node_output'`, `nodeId: WorkflowIdentifier`, and bounded `path: string[]` (max 16 segments). Avoids ambiguous dotted notation; node IDs containing dots remain intact without string splitting.
+  - `ValueBindingSchema` & `ValueBinding`: Discriminated union on `type` (`'literal' | 'reference'`) with strict compile-time discriminator narrowing.
+  - `OutputNodeConfigSchema` & `OutputNodeConfig`: Strict object requiring `payloadMapping: Record<WorkflowIdentifier, ValueBinding>` (1 to 50 fields). Terminal behavior decoupled from schema (enforced by graph topology).
+  - Draft Compatibility: Preserved structural `WorkflowNodeSchema` allowing empty `{ config: {} }` during canvas drafting, while `OutputNodeConfigSchema` strictly validates typed output configurations.
+- **Verification**: `[AGENT-LOCAL]`
+  - 31 Vitest runtime tests in `test/value-binding.spec.ts` passing (positive literal/reference parsing, data preservation, negative rejections, compile-time narrowing).
+  - 18 Vitest runtime tests in `test/output-config.spec.ts` passing (literal/reference/mixed mappings, key preservation, size limits, negative structural failures, boundary draft compatibility).
+  - 58 existing Vitest tests (`test/workflow-schema.spec.ts` and `test/input-config.spec.ts`) continue passing without modification (107 total tests in contracts).
+  - Clean-build verified: deleting `packages/contracts/dist` and executing `pnpm test` successfully rebuilds ESM declarations and passes all 107 tests.
+  - Full monorepo verification: `format:check`, `lint:root`, `lint`, `typecheck`, `turbo run build --force`, and `turbo run test --force` (112 total tests across api, worker, and contracts) all passing with exit code 0.
+- **Commit Status**: Preserved in working tree (developer-controlled commits).
+
+### Milestone 2A-B1c — Declarative TRANSFORM Node Configuration Schemas
+
+- **Status**: `COMPLETED`
+- **Scope**: Extend `@flowforge/contracts` with standalone, strict declarative transformation schemas supporting 4 approved V1 operations (`json_pick`, `json_set`, `template_string`, `math_op`) via Zod discriminated unions.
+- **Files Created**:
+  - `packages/contracts/src/workflow/node-configs/transform-config.ts`
+  - `packages/contracts/test/transform-config.spec.ts`
+- **Files Modified**:
+  - `packages/contracts/src/index.ts` (public exports)
+  - `README.md`
+  - `DEVELOPMENT_PLAN.md`
+  - `CHANGELOG.md`
+- **Deliverables**:
+  - `JsonPickTransformRuleSchema` & `JsonPickTransformRule`: Extracts data from `ValueReference` into `targetKey`, with optional JSON `fallbackValue` (strictly rejecting explicit `undefined`).
+  - `JsonSetTransformRuleSchema` & `JsonSetTransformRule`: Assigns explicit `ValueBinding` to `targetKey` without mutation of upstream data.
+  - `TemplateTextSegmentSchema`, `TemplateReferenceSegmentSchema`, `TemplateSegmentSchema`: Declarative template segment building blocks (1 to 100 segments, max 5000 chars total static text) avoiding ambiguous dotted string splitting.
+  - `TemplateStringTransformRuleSchema` & `TemplateStringTransformRule`: Ordered concatenation of text and reference segments with exact authored whitespace/casing preservation.
+  - `MathOperatorSchema`, `MathOpTransformRuleSchema` & `MathOpTransformRule`: Bounded binary arithmetic (`add`, `subtract`, `multiply`, `divide`) enforcing finite numbers on literal operands and rejecting division by zero at configuration validation time.
+  - `TransformRuleSchema`: Discriminated union on `operation` enabling precise compile-time TypeScript narrowing.
+  - `TransformNodeConfigSchema` & `TransformNodeConfig`: Strict object requiring 1 to 50 transform rules with `.superRefine` enforcing unique `targetKey` names across rules (`rules[index].targetKey`).
+  - Draft Compatibility: Preserved structural `WorkflowNodeSchema` allowing empty `{ config: {} }` during canvas drafting, while `TransformNodeConfigSchema` strictly validates typed transform configurations.
+- **Verification**: `[AGENT-LOCAL]`
+  - 43 Vitest runtime tests in `test/transform-config.spec.ts` passing (positive operation parsing, data preservation, negative rejections, compile-time narrowing, boundary draft compatibility).
+  - 107 existing Vitest tests (`test/workflow-schema.spec.ts`, `test/input-config.spec.ts`, `test/value-binding.spec.ts`, `test/output-config.spec.ts`) continue passing without modification (150 total tests in contracts).
+  - Clean-build verified: deleting `packages/contracts/dist` and executing `pnpm test` successfully rebuilds ESM declarations and passes all 150 tests.
+  - Full monorepo verification: `format:check`, `lint:root`, `lint`, `typecheck`, `turbo run build --force`, and `turbo run test --force` (155 total tests across api, worker, and contracts) all passing with exit code 0.
+- **Commit Status**: Preserved in working tree (developer-controlled commits).
+
+---
+
+### Milestone 2A-B2a — CONDITION Configuration and Explicit Branch Metadata
+
+- **Date**: 2026-11-04
+- **Status**: `COMPLETED`
+- **Scope**: Extend `@flowforge/contracts` with standalone, strict configuration schemas for the `CONDITION` node and explicit branch routing metadata on `WorkflowEdgeSchema`.
+- **Files Created**:
+  - `packages/contracts/src/workflow/node-configs/condition-config.ts`
+  - `packages/contracts/test/condition-config.spec.ts`
+  - `packages/contracts/test/condition-edge.spec.ts`
+- **Files Modified**:
+  - `packages/contracts/src/workflow/workflow-edge.ts` (added `ConditionOutcomeSchema`, `conditionOutcome?: ConditionOutcomeSchema`, `.superRefine` rejecting explicit `undefined`)
+  - `packages/contracts/src/index.ts` (public exports)
+  - `README.md`
+  - `DEVELOPMENT_PLAN.md`
+  - `CHANGELOG.md`
+- **Deliverables**:
+  - `BinaryConditionOperatorSchema` & `BinaryConditionOperator`: 8 approved binary comparison operators (`equals`, `not_equals`, `greater_than`, `less_than`, `greater_than_or_equal`, `less_than_or_equal`, `contains`, `not_contains`).
+  - `BinaryConditionConfigSchema` & `BinaryConditionConfig`: Binary predicate requiring both `left` and `right` operands as `ValueBindingSchema`.
+  - `UnaryConditionOperatorSchema` & `UnaryConditionOperator`: 4 approved unary comparison operators (`is_empty`, `is_not_empty`, `is_null`, `is_not_null`).
+  - `UnaryConditionConfigSchema` & `UnaryConditionConfig`: Unary predicate requiring `left` as `ValueBindingSchema` and strictly forbidding `right` via `.strict()`.
+  - `ConditionNodeConfigSchema` & `ConditionNodeConfig`: Discriminated union of binary and unary configurations enabling exact compile-time TypeScript narrowing.
+  - `ConditionOutcomeSchema` & `ConditionOutcome`: Explicit domain enum (`'TRUE' | 'FALSE'`).
+  - `WorkflowEdgeSchema` Extension: Added optional `conditionOutcome?: ConditionOutcomeSchema` with `.superRefine` rejecting explicit `undefined`, strictly separating edge routing targets from condition node configuration.
+  - Schema Boundaries & Draft Compatibility: `WorkflowNodeSchema` permits draft CONDITION nodes with `{ config: {} }`, while `ConditionNodeConfigSchema` enforces complete predicate definitions. Edge counts and dangling reference validations are decoupled and reserved for graph analysis algorithms.
+- **Verification**: `[AGENT-LOCAL]`
+  - 31 Vitest runtime tests in `test/condition-config.spec.ts` passing (positive operator tests, literal preservation, negative rejections, compile-time narrowing, boundary draft compatibility).
+  - 14 Vitest runtime tests in `test/condition-edge.spec.ts` passing (standard edges, TRUE/FALSE edges, explicit undefined rejections, boundary graph integration).
+  - 150 existing Vitest tests continue passing without modification (195 total tests in contracts).
+  - Clean-build verified: deleting `packages/contracts/dist` and executing `pnpm test` successfully rebuilds ESM declarations and passes all 195 tests.
+  - Full monorepo verification: `format:check`, `lint:root`, `lint`, `typecheck`, `turbo run build --force`, and `turbo run test --force` (200 total tests across api, worker, and contracts) all passing with exit code 0.
+- **Commit Status**: Preserved in working tree (developer-controlled commits).
+
+---
+
+### Milestone 2A-B2b — LLM Node Configuration Schema and Validation Tests
+
+- **Date**: 2026-11-04
+- **Status**: `COMPLETED`
+- **Scope**: Extend `@flowforge/contracts` with standalone, strict configuration schemas for the `LLM` workflow node, string-only prompt literal binding, prompt discriminated union, and optional generation parameters.
+- **Files Created**:
+  - `packages/contracts/src/workflow/node-configs/llm-config.ts`
+  - `packages/contracts/test/llm-config.spec.ts`
+- **Files Modified**:
+  - `packages/contracts/src/index.ts` (public exports)
+  - `README.md`
+  - `DEVELOPMENT_PLAN.md`
+  - `CHANGELOG.md`
+- **Deliverables**:
+  - `LlmPromptLiteralBindingSchema` & `LlmPromptLiteralBinding`: Requires string-only prompt literal (`type: 'literal'`, `value: string`, 1–10,000 characters, non-whitespace-only) strictly rejecting non-string JSON values, numbers, and nulls.
+  - `LlmPromptBindingSchema` & `LlmPromptBinding`: Discriminated union of `LlmPromptLiteralBindingSchema` and existing `ReferenceBindingSchema`, enabling compile-time TypeScript narrowing.
+  - `LlmResponseFormatSchema` & `LlmResponseFormat`: Approved V1 response format modes (`'text' | 'json'`).
+  - `LlmNodeConfigSchema` & `LlmNodeConfig`: Strict object schema requiring provider (1–50 chars, reject whitespace-only), model (1–100 chars, reject whitespace-only, preserves punctuation), and prompt binding.
+  - Optional Generation Parameters: `systemInstruction` (1–5,000 chars, reject whitespace-only), `temperature` (bounded finite number 0–2), `maxTokens` (integer 1–16,384), and `responseFormat`.
+  - Strict Security & Serialization Boundaries: Rejects unknown properties (e.g. `apiKey`, `clientSecret`, `baseUrl`) and explicitly present `undefined` optional fields via `.superRefine`. Zero embedded credentials, zero hardcoded vendor enums, and zero assumptions about vendor APIs.
+  - Draft Compatibility: Preserved structural `WorkflowNodeSchema` allowing `{ config: {} }` during canvas drafting, while `LlmNodeConfigSchema` strictly validates declared configurations for execution readiness.
+- **Verification**: `[AGENT-LOCAL]`
+  - 50 Vitest runtime tests in `test/llm-config.spec.ts` passing (positive configurations, multiline prompt preservation, punctuation retention, negative rejections, credential rejections, boundary draft compatibility, and compile-time narrowing).
+  - 195 existing Vitest tests continue passing without modification (245 total tests in contracts).
+  - Clean-build verified: deleting `packages/contracts/dist` and executing `pnpm test` successfully rebuilds ESM declarations and passes all 245 tests.
+  - Full monorepo verification: `format:check`, `lint:root`, `lint`, `typecheck`, `turbo run build --force`, and `turbo run test --force` (250 total tests across api, worker, and contracts) all passing with exit code 0.
+- **Commit Status**: Preserved in working tree (developer-controlled commits).
+
+---
+
+### Milestone 2A-B2c — MCP_TOOL Node Configuration Schema and Validation Tests
+
+- **Date**: 2026-11-04
+- **Status**: `COMPLETED`
+- **Scope**: Extend `@flowforge/contracts` with standalone, strict configuration schemas for the `MCP_TOOL` workflow node, tool argument mappings, and execution timeout parameters.
+- **Files Created**:
+  - `packages/contracts/src/workflow/node-configs/mcp-tool-config.ts`
+  - `packages/contracts/test/mcp-tool-config.spec.ts`
+- **Files Modified**:
+  - `packages/contracts/src/index.ts` (public exports)
+  - `README.md`
+  - `DEVELOPMENT_PLAN.md`
+  - `CHANGELOG.md`
+- **Deliverables**:
+  - `McpToolNameSchema` & `McpToolName`: Validates external tool names (1–128 chars, non-whitespace-only) allowing standard tool punctuation (`_`, `-`, `/`, `.`, `@`).
+  - `McpToolArgumentNameSchema` & `McpToolArgumentName`: Validates external tool parameter names (1–128 chars, non-whitespace-only) allowing dots, hyphens, and spaces to match external JSON Schema property conventions.
+  - `McpToolNodeConfigSchema` & `McpToolNodeConfig`: Strict object schema requiring `integrationRef` (opaque workspace-scoped reference under `WorkflowIdentifierSchema`, 1–128 chars) and `toolName`. Supports optional `arguments` mapping (`Record<string, ValueBinding>`, max 50 entries) and optional `timeoutMs` (integer milliseconds, bounded 500–300,000 ms).
+  - Strict Security & Authorization Boundaries: Rejects unknown properties (e.g. `apiKey`, `serverUrl`, `baseUrl`, `transport`, `command`, `env`), self-authorization bypass fields (`safeToRun`, `bypassApproval`), and explicitly present `undefined` optional fields via `.superRefine`. Zero embedded credentials, zero dynamic code/shell execution, and zero filesystem or network calls.
+  - Draft Compatibility: Preserved structural `WorkflowNodeSchema` allowing `{ config: {} }` during canvas drafting, while `McpToolNodeConfigSchema` strictly validates declared configurations for execution readiness.
+- **Verification**: `[AGENT-LOCAL]`
+  - 51 Vitest runtime tests in `test/mcp-tool-config.spec.ts` passing (positive configurations, argument mappings, boundary timeouts, negative rejections, credential rejections, self-authorization rejections, draft compatibility, and compile-time narrowing).
+  - 245 existing Vitest tests continue passing without modification (296 total tests in contracts).
+  - Clean-build verified: deleting `packages/contracts/dist` and executing `pnpm test` successfully rebuilds ESM declarations and passes all 296 tests.
+  - Full monorepo verification: `format:check`, `lint:root`, `lint`, `typecheck`, `turbo run build --force`, and `turbo run test --force` (301 total tests across api, worker, and contracts) all passing with exit code 0.
+- **Commit Status**: Preserved in working tree (developer-controlled commits).
+
+---
+
+### Milestone 2A-B2d — Human APPROVAL Node Configuration Schema and Validation Tests
+
+- **Date**: 2026-11-04
+- **Status**: `COMPLETED`
+- **Scope**: Extend `@flowforge/contracts` with standalone, strict configuration schemas for the human `APPROVAL` workflow node, approver role policy, and timeout handling parameters.
+- **Files Created**:
+  - `packages/contracts/src/workflow/node-configs/approval-config.ts`
+  - `packages/contracts/test/approval-config.spec.ts`
+- **Files Modified**:
+  - `packages/contracts/src/index.ts` (public exports)
+  - `README.md`
+  - `DEVELOPMENT_PLAN.md`
+  - `CHANGELOG.md`
+- **Deliverables**:
+  - `ApproverRoleSchema` & `ApproverRole`: 3 approved workspace membership roles (`OWNER`, `ADMIN`, `MEMBER`) as configuration identifiers.
+  - `ApprovalPolicySchema` & `ApprovalPolicy`: Requires `roles: ApproverRole[]` (1–3 unique roles), rejecting duplicate roles via `.superRefine` reporting errors at `policy.roles[index]` while preserving authored order.
+  - `ApprovalTimeoutActionSchema` & `ApprovalTimeoutAction`: Explicit timeout expiration actions (`'REJECT' | 'EXPIRE'`), strictly forbidding automatic approval.
+  - `ApprovalNodeConfigSchema` & `ApprovalNodeConfig`: Strict object schema requiring `title` (1–120 characters, non-whitespace-only), `policy`, `timeoutMinutes` (integer 1–10,080 / 7 days), and `timeoutAction`, with optional `description` (up to 1,000 characters).
+  - Strict Security Boundaries & Serialization: Rejects unknown properties, self-authorization bypass fields (`autoApprove`, `bypassApproval`, etc.), runtime decision state (`status`, `decision`, `approverUserId`), and explicitly present `undefined` optional fields via `.superRefine`.
+  - Draft Compatibility: Preserved structural `WorkflowNodeSchema` allowing `{ config: {} }` during canvas drafting, while `ApprovalNodeConfigSchema` strictly validates complete declarations for publish/execution readiness.
+- **Verification**: `[AGENT-LOCAL]`
+  - 45 Vitest runtime tests in `test/approval-config.spec.ts` passing (positive configurations, role combinations, timeout boundaries, negative rejections, bypass rejections, draft compatibility, and compile-time narrowing).
+  - 296 existing Vitest tests continue passing without modification (341 total tests in contracts).
+  - Clean-build verified: deleting `packages/contracts/dist` and executing `pnpm test` successfully rebuilds ESM declarations and passes all 341 tests.
+  - Full monorepo verification: `format:check`, `lint:root`, `lint`, `typecheck`, `turbo run build --force`, and `turbo run test --force` (346 total tests across api, worker, and contracts) all passing with exit code 0.
+- **Commit Status**: Preserved in working tree (developer-controlled commits).
+
+### Milestone 2A-B3a — Typed Workflow Node Composition and Discriminated Union
+
+- **Date**: 2026-11-09
+- **Status**: `COMPLETED`
+- **Scope**: Extend `@flowforge/contracts` with a strictly validated Zod 4 discriminated union on property `type` (`ConfiguredWorkflowNodeSchema`, `ConfiguredWorkflowNode`) uniting all seven fully configured workflow node variants (`INPUT`, `TRANSFORM`, `CONDITION`, `LLM`, `MCP_TOOL`, `APPROVAL`, `OUTPUT`).
+- **Files Created**:
+  - `packages/contracts/src/workflow/configured-node.ts`
+  - `packages/contracts/test/configured-node.spec.ts`
+- **Files Modified**:
+  - `packages/contracts/src/workflow/node-configs/input-config.ts` (narrow fix: explicit `undefined` check for `description` in `InputFieldDefinitionSchema` to maintain cross-contract JSON serializability invariant)
+  - `packages/contracts/test/input-config.spec.ts` (regression test for `description: undefined`)
+  - `packages/contracts/src/index.ts` (public exports)
+  - `README.md`
+  - `DEVELOPMENT_PLAN.md`
+  - `DEVELOPMENT_LOG.md`
+  - `CHANGELOG.md`
+- **Deliverables**:
+  - `ConfiguredWorkflowNodeSchema` & `ConfiguredWorkflowNode`: Zod 4 discriminated union on property `type` covering all seven approved V1 node variants (`ConfiguredInputNodeSchema`, `ConfiguredTransformNodeSchema`, `ConfiguredConditionNodeSchema`, `ConfiguredLlmNodeSchema`, `ConfiguredMcpToolNodeSchema`, `ConfiguredApprovalNodeSchema`, `ConfiguredOutputNodeSchema`).
+  - Strict Object Validation & Structural Reuse: Reuses `WorkflowNodeSchema.shape.id` (`WorkflowIdentifierSchema`) and `WorkflowNodeSchema.shape.position` (`WorkflowNodePositionSchema`), enforcing `.strict()` on all variants to forbid unexpected top-level or config properties.
+  - No AGENT or Fallback Types: Contains exactly 7 approved variants; no `AGENT` variant or catch-all fallback schema exists.
+  - Cross-Contract Serializability & Narrow Fix: Discovered and corrected a cross-contract serializability inconsistency in `InputFieldDefinitionSchema` where `description: undefined` was accepted by `input-config.ts` but failed `WorkflowNodeSchema`'s `z.json()` validation. Added explicit `undefined` rejection to `InputFieldDefinitionSchema.superRefine`, aligning it with all other schemas and ensuring every configured node passes `WorkflowNodeSchema`.
+  - Draft Compatibility Preservation: Generic `WorkflowNodeSchema` and `WorkflowGraphSchema` remain completely intact, continuing to accept incomplete draft nodes (`{ config: {} }`), while `ConfiguredWorkflowNodeSchema` strictly enforces complete type-specific configurations.
+  - Non-Publication Boundary: Single-node configuration schema strictly decouples from graph topology, cycle detection, reachability, branch completeness, runtime credential authorization, or provider connectivity (deferred to Milestone 2B).
+- **Verification**: `[AGENT-LOCAL]`
+  - 43 Vitest runtime tests in `test/configured-node.spec.ts` passing (positive validation across all 7 node variants, schema variant selection, coordinate preservation, generic `WorkflowNodeSchema` compliance, JSON round-trip serialization, negative rejections, type-config mismatch rejections, unexpected property rejections, explicit `undefined` serializability rejections, draft compatibility, and compile-time TypeScript narrowing).
+  - 1 regression test added in `test/input-config.spec.ts` passing (30 total tests in input-config).
+  - 385 total Vitest tests in `@flowforge/contracts` across 11 test files passing.
+  - Clean-build verified: deleting `packages/contracts/dist` and executing `pnpm test` successfully rebuilds ESM declarations and passes all 385 tests.
+  - Full monorepo verification: `format:check`, `lint:root`, `lint`, `typecheck`, `turbo run build --force`, and `turbo run test --force` (390 total tests across api, worker, and contracts) all passing with exit code 0.
+- **Commit Status**: Preserved in working tree (developer-controlled commits).
+
+---
+
+### Milestone 2A-B3b — Workflow-Level Node Configuration Validation and Diagnostics
+
+- **Date**: 2026-11-09
+- **Status**: `COMPLETED`
+- **Scope**: Extend `@flowforge/contracts` with standalone and workflow-level node configuration validation functions (`validateNodeConfig`, `validateWorkflowNodeConfigs`, `formatValidationPath`) returning sanitized, structured, editor-ready diagnostics without short-circuiting.
+- **Files Created**:
+  - `packages/contracts/src/workflow/workflow-config-validation.ts`
+  - `packages/contracts/test/workflow-config-validation.spec.ts`
+- **Files Modified**:
+  - `packages/contracts/src/index.ts` (public exports)
+  - `README.md`
+  - `DEVELOPMENT_PLAN.md`
+  - `DEVELOPMENT_LOG.md`
+  - `CHANGELOG.md`
+- **Deliverables**:
+  - `validateNodeConfig(type: WorkflowNodeType, config: unknown)`: Validates a single node's configuration object against the schema corresponding to its type. Exhaustive dispatch table via `Record<WorkflowNodeType, z.ZodTypeAny>` ensuring compile-time completeness. Pure, deterministic, and non-throwing.
+  - `validateWorkflowNodeConfigs(graph: WorkflowGraph)`: Aggregates configuration issues across all nodes in a structurally valid draft graph without short-circuiting on the first error. Preserves exact node index, ID, and type.
+  - `formatValidationPath(path)`: Formats structured path segments into human-readable dot and quoted bracket notation (`nodes[3].config.prompt`, `nodes[0].config.payloadMapping["result.summary"]`).
+  - Diagnostic & Result Types: `NodeConfigValidationIssue`, `WorkflowNodeConfigValidationIssue`, `NodeConfigValidationResult`, `WorkflowNodeConfigValidationResult` with TypeScript discriminated union narrowing on `success`.
+  - Non-Leaking Diagnostics: Issues contain only sanitized string/number paths, messages, codes, and displayPaths; raw configuration objects, user prompt text, secrets, and stack traces are excluded.
+  - Draft Preservation: `WorkflowGraphSchema` and `WorkflowNodeSchema` continue to accept `{ config: {} }` for canvas drafts, while `validateWorkflowNodeConfigs` exposes structured validation diagnostics.
+  - Non-Publication Boundary: Does not evaluate DAG cycles, reachability, branch completeness, or live integrations (deferred to Milestone 2B and Phase 3).
+- **Verification**: `[AGENT-LOCAL]`
+  - 47 Vitest runtime tests in `test/workflow-config-validation.spec.ts` passing (positive validation for all 7 node kinds, 7-node complete graph, empty graph, unresolvable upstream references, purity/determinism, non-mutation, negative rejections, multi-node error aggregation, multi-error intra-node retention, exact node index/ID/type preservation, nested numeric indices, punctuation in keys, raw value omission, JSON serializability, draft structural preservation, boundary decoupling, and compile-time narrowing).
+  - 432 total Vitest tests in `@flowforge/contracts` across 12 test files passing.
+  - Clean-build verified: deleting `packages/contracts/dist` and executing `pnpm test` successfully rebuilds ESM declarations and passes all 432 tests.
+  - Full monorepo verification: `format:check`, `lint:root`, `lint`, `typecheck`, `turbo run build --force`, and `turbo run test --force` (437 total tests across api, worker, and contracts) all passing with exit code 0.
+- **Commit Status**: Preserved in working tree (developer-controlled commits).
+
+---
+
+### Phase 2A Final Quality Gate — Diagnostic Safety, Path Escaping, and Checkpoint Readiness
+
+- **Date**: 2026-11-09
+- **Status**: `COMPLETED`
+- **Scope**: Comprehensive security, privacy, escaping, and regression audit of Phase 2A contracts before manual checkpoint commit. Verified diagnostic message privacy model, path escaping robustness, and monorepo readiness.
+- **Files Modified**:
+  - `packages/contracts/src/workflow/workflow-config-validation.ts` (enhanced documentation of privacy boundaries and defensive string escaping)
+  - `packages/contracts/test/workflow-config-validation.spec.ts` (added 8 comprehensive regression tests covering escaping of quotes, backslashes, newlines, control characters, unicode, brackets, punctuation, string vs numeric indices, and data non-exposure)
+  - `DEVELOPMENT_LOG.md`
+- **Audit Findings**:
+  - **Diagnostic Privacy**: Raw configuration values (e.g. prompt text, payload literals, passwords in config values) are NOT copied into issues. However, authored property names and identifiers legitimately appear in Zod issue messages and paths (e.g. unrecognized key errors). Documentation was clarified so callers treat diagnostics as sensitive and render them as plain text.
+  - **Path Formatter Escaping**: `formatValidationPath` leverages standard JSON stringification (`JSON.stringify(String(segment))`) for non-identifier string segments, safely handling double quotes (`\"`), backslashes (`\\`), newlines (`\n`), tabs (`\t`), carriage returns (`\r`), null bytes (`\u0000`), and non-ASCII Unicode (`field_🚀`).
+  - **Draft Compatibility**: Structural schema allows incomplete drafts (`{ config: {} }`); configuration diagnostics remain strictly decoupled from graph topology (cycle detection, DAG reachability) and execution.
+- **Verification**: `[AGENT-LOCAL]`
+  - 55 Vitest runtime tests in `test/workflow-config-validation.spec.ts` passing (+8 new regression tests).
+  - 440 total Vitest tests in `@flowforge/contracts` across 12 test files passing.
+  - Full monorepo verification: `format:check`, `lint:root`, `lint`, `typecheck`, `turbo run build --force`, and `turbo run test --force` (445 total tests across api, worker, and contracts) all passing with exit code 0.
+- **Commit Status**: Preserved in working tree (developer-controlled commits). Ready for manual checkpoint commit.
 
 ---
 
 ## 4. Upcoming Work
 
-### Milestone 1H — Final Phase 1 Verification and Developer-Controlled Commit
+### Phase 2B — Workflow Graph Core (`packages/workflow-core`)
 
 - **Status**: `NOT STARTED`
-- **Prerequisites**: Milestone 1G completion.
-- **Scope**: Execute full repository-wide audit, review git status, and hand off clean workspace for the developer's manual Phase 1 git commit.
-
-- **Status**: `NOT STARTED`
-- **Prerequisites**: Milestone 1G completion.
-- **Scope**: Execute full repository-wide audit, review git status, and hand off clean workspace for the developer's manual Phase 1 git commit.
+- **Scope**: Create framework-independent domain package `@flowforge/workflow-core`. Implement pure DAG algorithms (cycle detection via Kahn's algorithm, connectivity checks, reachability, condition branch completeness, topological sorting) and execution state machine primitives.
 
 ---
 

@@ -20,6 +20,14 @@
     "lint": "eslint src test",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "typecheck:test": "tsc --noEmit -p tsconfig.test.json",
-    "test": "pnpm run build && pnpm run typecheck:test"
+    "test:unit": "vitest run",
+    "test:watch": "vitest",
+    "test": "pnpm run build && pnpm run typecheck:test && vitest run"
+  },
+  "dependencies": {
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "vitest": "5.1.0"
   }
 }

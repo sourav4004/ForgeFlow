@@ -133,8 +133,18 @@ flowchart TD
 ### Workstream Breakdown:
 
 1. **Runtime Validation Schemas (`packages/contracts`)**:
-   - Define Zod schemas and TypeScript types for nodes, ports, edges, and trigger payloads.
-   - _Deliverable_: Exported schemas in `@flowforge/contracts`.
+   - **Milestone 2A-A (Completed)**: Basic workflow graph contracts and Zod 4 runtime schemas (`WorkflowNodeTypeSchema`, `WorkflowNodeSchema`, `WorkflowEdgeSchema`, `WorkflowGraphSchema`, `WorkflowIdentifierSchema`) with Vitest runtime testing. Strict structural validation enforced with zero mutation of valid identifiers.
+   - **Milestone 2A-B (Completed)**: Typed, node-specific configuration schemas for approved V1 node kinds:
+     - **Milestone 2A-B1a (Completed)**: Standalone `InputNodeConfigSchema`, `InputFieldDefinitionSchema`, and `InputFieldTypeSchema` in `@flowforge/contracts` with strict default-value type compatibility, zero-field INPUT support, and draft compatibility tests.
+     - **Milestone 2A-B1b (Completed)**: Reusable value bindings (`LiteralBindingSchema`, `InputValueReferenceSchema`, `NodeOutputValueReferenceSchema`, `ValueBindingSchema`) and `OutputNodeConfigSchema` with bounded property-path segment arrays, draft backward compatibility, and 49 runtime tests.
+     - **Milestone 2A-B1c (Completed)**: Declarative `TransformNodeConfigSchema` with 4 approved V1 operations (`json_pick`, `json_set`, `template_string`, `math_op`), static template segment arrays, finite arithmetic validation, draft backward compatibility, and 43 runtime tests.
+     - **Milestone 2A-B2a (Completed)**: `ConditionNodeConfigSchema` (binary & unary operators), `ConditionOutcomeSchema` ('TRUE' | 'FALSE'), and explicit edge condition outcome metadata on `WorkflowEdgeSchema` (strictly rejecting explicit `undefined`), with 45 runtime tests.
+     - **Milestone 2A-B2b (Completed)**: Provider-agnostic `LlmNodeConfigSchema`, string-only `LlmPromptLiteralBindingSchema`, `LlmPromptBindingSchema`, optional generation parameters (`systemInstruction`, `temperature`, `maxTokens`, `responseFormat`), and strict rejection of credential fields, with 50 runtime tests.
+     - **Milestone 2A-B2c (Completed)**: Framework-independent `McpToolNodeConfigSchema` with workspace-scoped `integrationRef`, `toolName`, `arguments` (`Record<string, ValueBinding>`, max 50 entries), optional `timeoutMs` (500–300,000 ms), and strict security boundaries, with 51 runtime tests.
+     - **Milestone 2A-B2d (Completed)**: Human `ApprovalNodeConfigSchema` with explicit role policy (`ApproverRoleSchema`: `'OWNER' | 'ADMIN' | 'MEMBER'`), bounded timeout (1–10,080 minutes), explicit timeout actions (`'REJECT' | 'EXPIRE'`), and strict rejection of self-authorization bypasses, with 45 runtime tests.
+     - **Milestone 2A-B3a (Completed)**: Typed workflow node composition and Zod 4 discriminated union (`ConfiguredWorkflowNodeSchema`, `ConfiguredWorkflowNode`) uniting all seven fully configured node variants, strict type narrowing, JSON serializability consistency across schemas (rejecting explicit `undefined`), preservation of draft compatibility (`WorkflowNodeSchema` still accepts `{ config: {} }`), and 43 runtime Vitest tests.
+     - **Milestone 2A-B3b (Completed)**: Workflow-level node configuration validation and editor-ready diagnostics (`validateNodeConfig`, `validateWorkflowNodeConfigs`, `formatValidationPath`) collecting all configuration issues across draft graphs without short-circuiting, preserving exact node IDs, indices, and structured error paths, with 47 runtime tests. (Phase 2A Complete).
+   - _Deliverables_: Exported schemas, validator functions, and inferred types in `@flowforge/contracts`.
 2. **Workflow Graph Core (`packages/workflow-core`)**:
    - Create a framework-independent domain package.
    - Implement cycle detection using Kahn's algorithm, connectivity checks, and schema compatibility checks.
