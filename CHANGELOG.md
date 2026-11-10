@@ -119,7 +119,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Implemented structured, non-leaking diagnostic issue and result types (`NodeConfigValidationIssue`, `WorkflowNodeConfigValidationIssue`, `NodeConfigValidationResult`, `WorkflowNodeConfigValidationResult`) with discriminated success narrowing.
   - Implemented multi-node diagnostic aggregation across draft graphs, collecting all issues across all nodes without short-circuiting on the first error, and preserving exact node index, ID, and type.
   - Implemented deterministic path formatting with dot notation and quoted bracket notation for keys containing dots, spaces, or special characters.
-  - Added comprehensive Vitest test suite (`packages/contracts/test/workflow-config-validation.spec.ts` with 47 tests) validating positive configurations, diagnostic aggregation, index/ID/type preservation, nested numeric indices, boundary decoupling, non-mutation, and compile-time TypeScript inference.
+  - Added comprehensive Vitest test suite (`packages/contracts/test/workflow-config-validation.spec.ts` with 55 tests) validating positive configurations, diagnostic aggregation, index/ID/type preservation, nested numeric indices, boundary decoupling, non-mutation, and compile-time TypeScript inference.
+- **Workflow Graph Analysis and Topological Ordering (`packages/workflow-core`)**:
+  - Established `@flowforge/workflow-core` standalone workspace package as pure ESM with TypeScript declarations and strict compile-time types.
+  - Implemented `analyzeWorkflowGraph(graph: WorkflowGraph): GraphAnalysisResult` executing staged integrity analysis:
+    - Stage A validates exact node and edge identifier uniqueness (preserving exact string equality, casing, and punctuation).
+    - Stage B validates edge referential integrity (verifying existence of sources and targets in the node set) with graceful immediate failure return to avoid false cycle diagnoses.
+    - Stage C executes Kahn's topological sort with a zero-dependency binary min-heap for deterministic $O((V + E) \log V)$ lexicographic tie-breaking, selecting the smallest node ID when multiple zero-indegree vertices are ready.
+  - Implemented structured, non-leaking diagnostic types (`GraphIntegrityIssueCode`, `GraphIntegrityIssue`, `GraphAnalysisSuccessResult`, `GraphAnalysisFailureResult`, `GraphAnalysisResult`) with discriminated success narrowing.
+  - Maintained draft backward compatibility, permitting draft nodes (`config: {}`), empty graphs (`{ nodes: [], edges: [] }`), disconnected acyclic components, and parallel edges with distinct IDs.
+  - Added comprehensive Vitest test suite (`packages/workflow-core/test/graph-analysis.spec.ts` with 50 tests) covering DAG traversal, determinism, reordering invariance, tie-breaking, parallel edge in-degree decrementing, self-loops, 2-node and multi-node cycles, immutability, and compile-time type narrowing.
+- **Workflow Graph Semantics and Static Reachability (`packages/workflow-core`)**:
+  - Implemented `validateWorkflowGraphSemantics(graph: WorkflowGraph): WorkflowGraphSemanticsResult` executing staged semantic validation:
+    - Integrity gating reusing `analyzeWorkflowGraph(graph)` to prevent misleading semantic errors on cyclic or referentially invalid graphs (`stage: 'integrity'`).
+    - At-least-one `INPUT` node and at-least-one `OUTPUT` node presence rules (`MISSING_INPUT_NODE`, `MISSING_OUTPUT_NODE`).
+    - Strict `CONDITION` node branch rules requiring exactly one `TRUE` and one `FALSE` outgoing edge (`CONDITION_TRUE_BRANCH_MISSING`, `CONDITION_FALSE_BRANCH_MISSING`, `CONDITION_OUTCOME_DUPLICATE`, `CONDITION_EDGE_OUTCOME_MISSING`, `CONDITION_EXTRA_OUTGOING_EDGE`).
+    - Non-CONDITION edge outcome prohibition strictly rejecting `conditionOutcome` metadata on edges originating from non-CONDITION nodes (`NON_CONDITION_EDGE_OUTCOME`).
+    - Static forward reachability from `INPUT` nodes via BFS in $\mathcal{O}(V + E)$ (`UNREACHABLE_FROM_INPUT`).
+    - Static reverse reachability to `OUTPUT` nodes via reverse BFS in $\mathcal{O}(V + E)$ (`CANNOT_REACH_OUTPUT`).
+  - Added structured, non-leaking semantic diagnostic types (`WorkflowGraphSemanticIssueCode`, `WorkflowGraphSemanticIssue`, `WorkflowGraphSemanticsSuccessResult`, `WorkflowGraphSemanticsIntegrityFailureResult`, `WorkflowGraphSemanticsSemanticFailureResult`, `WorkflowGraphSemanticsResult`) with discriminated success and stage narrowing.
+  - Added comprehensive Vitest test suite (`packages/workflow-core/test/graph-semantics.spec.ts` with 53 tests) validating branch integrity, reachability, integrity gating, and compile-time type narrowing.
+
+- **Static Node-Output Reference Integrity and DAG Ancestry (`packages/workflow-core`)**:
+  - Implemented `validateWorkflowNodeOutputReferences(graph: WorkflowGraph): WorkflowNodeOutputReferenceValidationResult` executing staged static reference lineage validation:
+    - Stage 1 integrity gating via `analyzeWorkflowGraph(graph)`, halting if structural integrity issues, cycles, or duplicate IDs are detected (`stage: 'integrity'`).
+    - Stage 2 configuration gating via `validateWorkflowNodeConfigs(graph)` from `@flowforge/contracts`, halting if any node configuration is incomplete or invalid (`stage: 'configuration'`).
+    - Stage 3 static node-output reference inspection across approved typed positions (`TRANSFORM` rules, `CONDITION` left/right, `LLM` prompt reference, `MCP_TOOL` arguments, `OUTPUT` payloadMapping) without recursive scanning of literal JSON or prompt strings.
+    - Strict reverse DAG ancestry validation via reverse BFS, verifying target node existence (`NODE_OUTPUT_REFERENCE_NOT_FOUND`), rejecting self-references (`NODE_OUTPUT_REFERENCE_SELF`), and checking strict directed ancestry (`NODE_OUTPUT_REFERENCE_NOT_UPSTREAM`).
+  - Added structured diagnostic types (`NodeOutputReferenceIssueCode`, `NodeOutputReferenceIssue`, `WorkflowNodeOutputReferenceSuccessResult`, `WorkflowNodeOutputReferenceIntegrityFailureResult`, `WorkflowNodeOutputReferenceConfigurationFailureResult`, `WorkflowNodeOutputReferenceFailureResult`, `WorkflowNodeOutputReferenceValidationResult`) with discriminated success and stage narrowing.
+  - Added comprehensive Vitest test suite (`packages/workflow-core/test/node-output-references.spec.ts` with 49 tests) validating positive references, negative ancestry violations, prerequisite stage gating, atomic dot IDs, literal isolation, and compile-time TypeScript inference.
+- **INPUT Field Reference Scope and Static Validation (`packages/workflow-core`)**:
+  - Implemented `validateWorkflowInputReferences(graph: WorkflowGraph): WorkflowInputReferenceValidationResult` executing staged static trigger input reference scope validation:
+    - Stage 1 integrity gating via `analyzeWorkflowGraph(graph)` and Stage 2 configuration gating via `validateWorkflowNodeConfigs(graph)`.
+    - Stage 3 unified workflow-level INPUT field namespace indexing and resolution:
+      - Builds frequency index across all declared fields in configured `INPUT` nodes.
+      - Enforces exact case-sensitive field identity.
+      - Emits `INPUT_REFERENCE_FIELD_NOT_FOUND` if a referenced field has zero declarations across all `INPUT` nodes.
+      - Emits `INPUT_REFERENCE_FIELD_AMBIGUOUS` if a referenced field has duplicate declarations across multiple `INPUT` nodes.
+      - Decouples input field resolution from graph ancestry: declaring `INPUT` node need not be a directed ancestor of consumer node.
+  - Added structured diagnostic types (`InputReferenceIssueCode`, `InputReferenceIssue`, `WorkflowInputReferenceSuccessResult`, `WorkflowInputReferenceIntegrityFailureResult`, `WorkflowInputReferenceConfigurationFailureResult`, `WorkflowInputReferenceFailureResult`, `WorkflowInputReferenceValidationResult`) with discriminated success and stage narrowing.
+  - Added comprehensive Vitest test suite (`packages/workflow-core/test/input-references.spec.ts` with 63 tests) validating positive references, missing fields, ambiguous multi-INPUT declarations, matching/different types, array order independence, literal isolation, prerequisite gating, frozen immutability, determinism, and TypeScript type narrowing.
+- **INPUT/OUTPUT Entry and Terminal Topology Validation (`packages/workflow-core`)**:
+  - Implemented `validateWorkflowEntryExitTopology(graph: WorkflowGraph): WorkflowEntryExitTopologyResult` enforcing entry/terminal boundary topology on workflow DAGs.
+  - Reused `validateWorkflowGraphSemantics(graph)` as a staged prerequisite, preserving integrity failures (`stage: 'integrity'`) and semantic failures (`stage: 'semantics'`) without redundant topological sorting.
+  - Enforced zero incoming edges on `INPUT` nodes (`INPUT_HAS_INCOMING_EDGE` targeting `['edges', edgeIndex, 'target']`).
+  - Enforced zero outgoing edges on `OUTPUT` nodes (`OUTPUT_HAS_OUTGOING_EDGE` targeting `['edges', edgeIndex, 'source']`).
+  - Supported multiple entry `INPUT` nodes and multiple terminal `OUTPUT` nodes.
+  - Handled compound boundary violations (e.g. `OUTPUT -> INPUT`) emitting both issues in deterministic edge order.
+  - Preserved deterministic topological sort ordering (`topologicalNodeIds`) on success.
+  - Added structured diagnostic types (`WorkflowEntryExitTopologyIssueCode`, `WorkflowEntryExitTopologyIssue`, `WorkflowEntryExitTopologySuccessResult`, `WorkflowEntryExitTopologyIntegrityFailureResult`, `WorkflowEntryExitTopologySemanticFailureResult`, `WorkflowEntryExitTopologyFailureResult`, `WorkflowEntryExitTopologyResult`) with discriminated success and stage narrowing.
+  - Added comprehensive Vitest test suite (`packages/workflow-core/test/entry-exit-topology.spec.ts` with 47 tests) validating valid topologies, boundary violations, prerequisite failure preservation, frozen immutability, determinism, and TypeScript compile-time type narrowing.
+- **Branch-Conditioned Node-Output Path Coverage Analysis (`packages/workflow-core`)**:
+  - Implemented `analyzeWorkflowNodeOutputPathCoverage(graph: WorkflowGraph): WorkflowNodeOutputPathCoverageResult` performing static path-dominance analysis on workflow DAGs.
+  - Reused `validateWorkflowEntryExitTopology` and `validateWorkflowNodeOutputReferences` as staged prerequisites, preserving integrity (`stage: 'integrity'`), semantic (`stage: 'semantics'`), entry/terminal boundary (`stage: 'entry_exit'`), configuration (`stage: 'configuration'`), and reference lineage (`stage: 'references'`) diagnostics without speculative evaluation.
+  - Defined path dominance relative to all workflow INPUT entrypoints: producer node $P$ dominates consumer node $C$ if every directed path from ANY `INPUT` node to $C$ contains $P$.
+  - Implemented producer-exclusion forward BFS reachability algorithm with intra-call caching per distinct referenced producer ($O(V + E + R + P(V + E))$).
+  - Emitted occurrence-level advisory control-flow findings (`NODE_OUTPUT_REFERENCE_NOT_ON_ALL_INPUT_PATHS`) identifying non-dominating references (such as conditional branch merges or optional bypasses) without treating them as hard graph errors or publication blockers.
+  - Added structured diagnostic and result types (`NodeOutputPathCoverageFindingCode`, `NodeOutputPathCoverageFinding`, `WorkflowNodeOutputPathCoverageSuccessResult`, `WorkflowNodeOutputPathCoverageIntegrityFailureResult`, `WorkflowNodeOutputPathCoverageSemanticFailureResult`, `WorkflowNodeOutputPathCoverageEntryExitFailureResult`, `WorkflowNodeOutputPathCoverageConfigurationFailureResult`, `WorkflowNodeOutputPathCoverageReferencesFailureResult`, `WorkflowNodeOutputPathCoverageResult`) with discriminated union stage narrowing.
+  - Added comprehensive Vitest test suite (`packages/workflow-core/test/node-output-path-coverage.spec.ts` with 60 tests) validating dominating linear pipelines, shared branch producers, branch-confined references, multiple inputs/outputs, conditional merges, optional side paths, distinct producers, occurrence preservation, prerequisite failures, determinism, frozen immutability, and TypeScript type discrimination.
 
 ### Changed
 

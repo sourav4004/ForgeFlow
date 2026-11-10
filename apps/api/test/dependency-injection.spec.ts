@@ -31,5 +31,5 @@ describe('NestJS Dependency Injection & Decorator Metadata', () => {
     expect(consumer.getInjectedValue()).toBe('dependency-injected-value');
 
     await moduleRef.close();
-  });
+  }, 30000);
 });

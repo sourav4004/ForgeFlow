@@ -1,7 +1,7 @@
 # FlowForge AI — Engineering Progress Log
 
-**Document Version**: 1.0.0  
-**Current Milestone**: 2B\
+**Document Version**: 1.7.0\
+**Current Milestone**: Phase 2B Complete (Awaiting Git Checkpoint) / Phase 2C (Upcoming)\
 **Status**: ACTIVE LOG\
 **Last Updated**: 2026-11-09
 
@@ -607,12 +607,277 @@ To maintain technical integrity and prevent false assumptions, verification evid
 
 ---
 
+### Milestone 2B-A — Graph Integrity and Deterministic Topological Ordering
+
+- **Date**: 2026-11-09
+- **Status**: `COMPLETED`
+- **Scope**: Create standalone framework-independent workspace package `@flowforge/workflow-core`. Implement pure, synchronous graph integrity validation and deterministic topological ordering using Kahn's algorithm with a zero-dependency binary min-heap for lexicographic tie-breaking.
+- **Files Created**:
+  - `packages/workflow-core/package.json`
+  - `packages/workflow-core/tsconfig.json`
+  - `packages/workflow-core/tsconfig.build.json`
+  - `packages/workflow-core/tsconfig.test.json`
+  - `packages/workflow-core/src/index.ts`
+  - `packages/workflow-core/src/graph-analysis.ts`
+  - `packages/workflow-core/test/graph-analysis.spec.ts`
+- **Files Modified**:
+  - `.github/workflows/ci.yml` (added workflow-core test typecheck step)
+  - `pnpm-lock.yaml` (workspace dependency registration)
+  - `README.md`
+  - `DEVELOPMENT_PLAN.md`
+  - `DEVELOPMENT_LOG.md`
+  - `CHANGELOG.md`
+- **Deliverables**:
+  - `analyzeWorkflowGraph(graph: WorkflowGraph): GraphAnalysisResult`: Pure, synchronous function evaluating graph integrity and calculating deterministic topological ordering. Accepts valid `WorkflowGraph` contracts and preserves input immutability without mutation.
+  - Staged Integrity-First Architecture:
+    - _Stage A_: Validates node and edge ID uniqueness with exact string equality (preserving casing and punctuation).
+    - _Stage B_: Validates edge referential integrity (sources and targets exist in graph). If Stage A or B detects errors, returns failure immediately and suppresses topological analysis to avoid false cycle diagnoses.
+    - _Stage C_: Runs Kahn's topological sort with binary min-heap priority queue for deterministic $O((V + E) \log V)$ lexicographic tie-breaking. Detects directed cycles if processed node count is less than graph node count.
+  - Diagnostic & Result Types: `GraphIntegrityIssueCode` (`'DUPLICATE_NODE_ID' | 'DUPLICATE_EDGE_ID' | 'MISSING_EDGE_SOURCE' | 'MISSING_EDGE_TARGET' | 'CYCLE_DETECTED'`), `GraphIntegrityIssue`, `GraphAnalysisSuccessResult`, `GraphAnalysisFailureResult`, `GraphAnalysisResult`. Discriminated on `success`.
+  - Non-Leaking Diagnostics: Errors contain only structured paths (e.g. `['nodes', index, 'id']`, `['edges', index, 'source']`, `['edges']`), stable messages, and codes without sensitive configuration payloads.
+  - Draft Compatibility: Transparently accepts draft nodes (`{ config: {} }`), empty graphs (`{ nodes: [], edges: [] }`), disconnected components, and parallel edges.
+  - Excluded Semantic Boundaries: Does not evaluate single INPUT/OUTPUT counts, branch completeness, reachability, or publishability (deferred to Milestone 2B-B).
+- **Verification**: `[AGENT-LOCAL]`
+  - 50 Vitest runtime tests in `packages/workflow-core/test/graph-analysis.spec.ts` passing (covering empty graphs, single nodes, linear chains, branching DAGs, diamonds, disconnected components, reordering invariance, tie-breaking, parallel edges, duplicate IDs, dangling endpoints, self-loops, 2-node and multi-node cycles, immutability, draft compatibility, and compile-time type narrowing).
+  - 440 Vitest tests in `@flowforge/contracts` across 12 files passing.
+  - 4 Vitest tests in `@flowforge/api` across 2 files passing.
+  - 1 Vitest smoke test in `@flowforge/worker` passing.
+  - Total monorepo test baseline: 495 tests passing across 16 test files.
+  - Full monorepo verification: `format:check`, `lint:root`, `lint`, `typecheck`, `turbo run build --force`, and `turbo run test --force` all passing with exit code 0.
+- **Commit Status**: Preserved in working tree (developer-controlled commits).
+
+---
+
+### Milestone 2B-B — CONDITION Branch Integrity and Static Graph Reachability
+
+- **Date**: 2026-11-09
+- **Status**: `COMPLETED`
+- **Scope**: Extend `@flowforge/workflow-core` with static workflow graph semantic validation (`validateWorkflowGraphSemantics`). Implemented staged integrity gating, entry/terminal presence rules, exact CONDITION branch routing checks, non-CONDITION edge outcome restrictions, and forward/reverse static reachability traversals with BFS in $\mathcal{O}(V + E)$.
+- **Files Created**:
+  - `packages/workflow-core/src/graph-semantics.ts`
+  - `packages/workflow-core/test/graph-semantics.spec.ts`
+- **Files Modified**:
+  - `packages/workflow-core/src/index.ts`
+  - `README.md`
+  - `DEVELOPMENT_PLAN.md`
+  - `DEVELOPMENT_LOG.md`
+  - `CHANGELOG.md`
+- **Deliverables**:
+  - `validateWorkflowGraphSemantics(graph: WorkflowGraph): WorkflowGraphSemanticsResult`: Staged semantic analysis function.
+    - Integrity Gating: Evaluates `analyzeWorkflowGraph(graph)` first. If structural or topological integrity issues exist, returns immediately with `stage: 'integrity'` and preserves the underlying `GraphIntegrityIssue` array.
+    - Entry & Terminal Presence: Enforces at least one `INPUT` node (`MISSING_INPUT_NODE`) and at least one `OUTPUT` node (`MISSING_OUTPUT_NODE`). Suppresses secondary reachability errors when entry or terminal sets are empty.
+    - CONDITION Branch Rules: Strictly requires exactly one `TRUE` branch and one `FALSE` branch on every `CONDITION` node. Emits `CONDITION_TRUE_BRANCH_MISSING`, `CONDITION_FALSE_BRANCH_MISSING`, `CONDITION_OUTCOME_DUPLICATE` (for repeated outcomes), `CONDITION_EDGE_OUTCOME_MISSING` (for unlabeled edges), and `CONDITION_EXTRA_OUTGOING_EDGE` (for more than 2 outgoing edges).
+    - Non-Condition Outcomes: Forbids `conditionOutcome` metadata on edges originating from non-CONDITION nodes (`NON_CONDITION_EDGE_OUTCOME`).
+    - Static Forward Reachability: Verifies every node is reachable from at least one `INPUT` node via forward BFS along directed edges (`UNREACHABLE_FROM_INPUT`).
+    - Static Reverse Reachability: Verifies every node can reach at least one `OUTPUT` node via reverse BFS along directed edges (`CANNOT_REACH_OUTPUT`).
+  - Diagnostic & Result Types: `WorkflowGraphSemanticIssueCode`, `WorkflowGraphSemanticIssue`, `WorkflowGraphSemanticsSuccessResult`, `WorkflowGraphSemanticsIntegrityFailureResult`, `WorkflowGraphSemanticsSemanticFailureResult`, `WorkflowGraphSemanticsResult`. Discriminated on `success` and `stage`.
+  - Pure Function Boundary: Synchronous, deterministic, side-effect-free, preserves input immutability, and operates on draft nodes (`config: {}`). Static reachability is decoupled from runtime condition evaluation, join scheduling, and publication snapshotting.
+- **Verification**: `[AGENT-LOCAL]`
+  - 53 Vitest runtime tests in `packages/workflow-core/test/graph-semantics.spec.ts` passing (covering positive topologies, condition branch variations, entry/terminal presence, forward/reverse reachability, integrity gating, immutability, boundary checks, and compile-time type narrowing).
+  - 103 total Vitest tests in `@flowforge/workflow-core` across 2 test files passing.
+  - 440 Vitest tests in `@flowforge/contracts` across 12 files passing.
+  - 4 Vitest tests in `@flowforge/api` across 2 files passing.
+  - 1 Vitest smoke test in `@flowforge/worker` passing.
+  - Total monorepo test baseline: 548 tests passing across 17 test files.
+  - Full monorepo verification: `format:check`, `lint:root`, `lint`, `typecheck`, `turbo run build --force`, and `turbo run test --force` all passing with exit code 0.
+- **Commit Status**: Preserved in working tree (developer-controlled commits).
+
+---
+
+### Milestone 2B-C1 — Static Node-Output Reference Integrity and DAG Ancestry
+
+- **Date**: 2026-11-09
+- **Status**: `COMPLETED`
+- **Scope**: Extend `@flowforge/workflow-core` with static node-output reference validation (`validateWorkflowNodeOutputReferences`). Implemented staged prerequisite validation (graph integrity Stage 1, node configuration validity Stage 2), typed extraction of approved reference-bearing positions without recursive JSON scanning, and strict reverse DAG ancestry verification via reverse BFS.
+- **Files Created**:
+  - `packages/workflow-core/src/node-output-references.ts`
+  - `packages/workflow-core/test/node-output-references.spec.ts`
+- **Files Modified**:
+  - `packages/workflow-core/src/index.ts`
+  - `README.md`
+  - `DEVELOPMENT_PLAN.md`
+  - `DEVELOPMENT_LOG.md`
+  - `CHANGELOG.md`
+- **Deliverables**:
+  - `validateWorkflowNodeOutputReferences(graph: WorkflowGraph): WorkflowNodeOutputReferenceValidationResult`: Staged static reference analysis function.
+    - Stage 1 (Integrity Gating): Reuses `analyzeWorkflowGraph(graph)`. If structural or topological integrity issues exist, returns immediately with `stage: 'integrity'` and preserves underlying `GraphIntegrityIssue` array without emitting speculative lineage errors.
+    - Stage 2 (Configuration Gating): Reuses `validateWorkflowNodeConfigs(graph)` from `@flowforge/contracts`. If any configuration is incomplete or malformed, returns immediately with `stage: 'configuration'` and preserves `WorkflowNodeConfigValidationIssue` array without scanning arbitrary draft JSON.
+    - Stage 3 (Node-Output Reference Checks): Traverses approved typed binding positions (`TRANSFORM` json_pick source, json_set value, template_string reference segments, math_op left/right; `CONDITION` left and right; `LLM` prompt reference; `MCP_TOOL` arguments; `OUTPUT` payloadMapping). Literal JSON objects and strings are never parsed or scanned recursively.
+    - Reference Lineage Invariants:
+      - Rule A (Existence): Emits `NODE_OUTPUT_REFERENCE_NOT_FOUND` if target node does not exist in graph.
+      - Rule B (Self-Reference): Emits `NODE_OUTPUT_REFERENCE_SELF` if target node matches consumer ID.
+      - Rule C (Strict Ancestry): Emits `NODE_OUTPUT_REFERENCE_NOT_UPSTREAM` if target node is not reachable via reverse DAG traversal.
+  - Architectural Boundaries & Limitations:
+    - Static ancestry guarantees directed path connectivity in the DAG, but does not guarantee runtime value availability when conditional branches (`CONDITION` TRUE/FALSE) skip paths.
+    - Trigger input references (`source: 'input'`) are recognized and deferred to Milestone 2B-C2.
+    - Complexity: Reverse adjacency build is $O(V + E)$; ancestor traversal across $K$ referencing consumers bounded by $O(V + E + K(V + E) + R)$.
+- **Verification**: `[AGENT-LOCAL]`
+  - 49 Vitest runtime tests in `packages/workflow-core/test/node-output-references.spec.ts` passing (covering empty graphs, all node kinds, binding positions, atomic dot IDs, literal isolation, deferred input references, conditional merge branches, frozen graphs, missing targets, self references, downstream/sibling references, topological non-ancestors, prerequisite failures, and TypeScript narrowing).
+  - 152 total Vitest tests in `@flowforge/workflow-core` across 3 test files passing.
+  - 440 Vitest tests in `@flowforge/contracts` across 12 files passing.
+  - 4 Vitest tests in `@flowforge/api` across 2 files passing.
+  - 1 Vitest smoke test in `@flowforge/worker` passing.
+  - Total monorepo test baseline: 597 tests passing across 18 test files.
+- **Commit Status**: Preserved in working tree (developer-controlled commits).
+
+---
+
+### Milestone 2B-C2 — INPUT Field Reference Scope and Static Validation
+
+- **Date**: 2026-11-09
+- **Status**: `COMPLETED`
+- **Scope**: Extend `@flowforge/workflow-core` with static trigger input reference validation (`validateWorkflowInputReferences`). Implemented staged prerequisite validation (graph integrity Stage 1, node configuration validity Stage 2), unified workflow-level INPUT field namespace indexing, exact case-sensitive field resolution, and missing/ambiguous field diagnostics.
+- **Files Created**:
+  - `packages/workflow-core/src/input-references.ts`
+  - `packages/workflow-core/test/input-references.spec.ts`
+- **Files Modified**:
+  - `packages/workflow-core/src/index.ts`
+  - `README.md`
+  - `DEVELOPMENT_PLAN.md`
+  - `DEVELOPMENT_LOG.md`
+  - `CHANGELOG.md`
+- **Deliverables**:
+  - `validateWorkflowInputReferences(graph: WorkflowGraph): WorkflowInputReferenceValidationResult`: Staged static input reference analysis function.
+    - Stage 1 (Integrity Gating): Reuses `analyzeWorkflowGraph(graph)` to verify identifier uniqueness, edge referential integrity, and acyclicity.
+    - Stage 2 (Configuration Gating): Reuses `validateWorkflowNodeConfigs(graph)` from `@flowforge/contracts` to ensure all configurations conform to their schemas before inspecting references.
+    - Stage 3 (Input Reference Scope): Resolves references against a workflow-wide input namespace built across all configured `INPUT` nodes:
+      - Field Occurrence Index: Map of exact case-sensitive field names to declaration counts across all `INPUT` nodes.
+      - Rule A (Missing Declaration): Emits `INPUT_REFERENCE_FIELD_NOT_FOUND` if a referenced field has 0 declarations across all `INPUT` nodes.
+      - Rule B (Ambiguous Duplicate): Emits `INPUT_REFERENCE_FIELD_AMBIGUOUS` if a referenced field has $> 1$ declarations across multiple `INPUT` nodes.
+      - Unreferenced duplicates do not trigger errors.
+      - Static resolution does not require graph ancestry between the declaring `INPUT` node and the consumer node.
+    - Approved reference-bearing positions traversed: `TRANSFORM` json_pick source, json_set value, template_string reference segments, math_op left/right; `CONDITION` left and right; `LLM` prompt reference; `MCP_TOOL` arguments; `OUTPUT` payloadMapping. Literal JSON, prompt text, and fallback values are never scanned.
+  - Diagnostic & Result Types: `InputReferenceIssueCode`, `InputReferenceIssue`, `WorkflowInputReferenceSuccessResult`, `WorkflowInputReferenceIntegrityFailureResult`, `WorkflowInputReferenceConfigurationFailureResult`, `WorkflowInputReferenceFailureResult`, `WorkflowInputReferenceValidationResult`.
+  - Algorithmic Complexity: Stage 3 runs in $\mathcal{O}(V + F + R)$ linear time with expected $\mathcal{O}(1)$ map lookups, where $F$ is declared fields and $R$ is total references.
+- **Verification**: `[AGENT-LOCAL]`
+  - 63 Vitest runtime tests in `packages/workflow-core/test/input-references.spec.ts` passing (covering positive references, missing fields, ambiguous multi-INPUT declarations, matching/different types, array order independence, literal isolation, prerequisite gating, frozen immutability, determinism, and TypeScript type narrowing).
+  - 215 total Vitest tests in `@flowforge/workflow-core` across 4 test files passing.
+  - 440 Vitest tests in `@flowforge/contracts` across 12 files passing.
+  - 4 Vitest tests in `@flowforge/api` across 2 files passing.
+  - 1 Vitest smoke test in `@flowforge/worker` passing.
+  - Total monorepo test baseline: 660 tests passing across 19 test files.
+- **Commit Status**: Preserved in working tree (developer-controlled commits).
+
+---
+
+### Milestone 2B-D1 — INPUT/OUTPUT Entry and Terminal Topology Validation
+
+- **Date**: 2026-11-09
+- **Status**: `COMPLETED`
+- **Scope**: Extend `@flowforge/workflow-core` with entry/terminal boundary topology validation (`validateWorkflowEntryExitTopology`). Implemented staged prerequisite validation (reusing `validateWorkflowGraphSemantics` to handle integrity and semantics errors), zero-indegree validation for `INPUT` nodes (`INPUT_HAS_INCOMING_EDGE`), zero-outdegree validation for `OUTPUT` nodes (`OUTPUT_HAS_OUTGOING_EDGE`), multi-input and multi-output topology support, and compound violation handling.
+- **Files Created**:
+  - `packages/workflow-core/src/entry-exit-topology.ts`
+  - `packages/workflow-core/test/entry-exit-topology.spec.ts`
+- **Files Modified**:
+  - `packages/workflow-core/src/index.ts`
+  - `README.md`
+  - `DEVELOPMENT_PLAN.md`
+  - `DEVELOPMENT_LOG.md`
+  - `CHANGELOG.md`
+- **Deliverables**:
+  - `validateWorkflowEntryExitTopology(graph: WorkflowGraph): WorkflowEntryExitTopologyResult`: Staged entry/terminal boundary analysis function.
+    - Stage Gating (Integrity & Semantics): Reuses `validateWorkflowGraphSemantics(graph)` directly.
+      - If graph integrity fails, returns `{ success: false, stage: 'integrity', issues: GraphIntegrityIssue[] }`.
+      - If graph semantics fails, returns `{ success: false, stage: 'semantics', issues: WorkflowGraphSemanticIssue[] }`.
+      - Avoids redundant topological sorting while guaranteeing structural acyclicity and basic semantic sanity.
+    - Stage 3 Entry/Terminal Boundary Topology Rules:
+      - Rule A (Zero-Indegree INPUT): Every node with `type: 'INPUT'` must have zero incoming edges ($\text{indegree} = 0$). Offending edges emit `INPUT_HAS_INCOMING_EDGE` targeting `['edges', edgeIndex, 'target']`.
+      - Rule B (Zero-Outdegree OUTPUT): Every node with `type: 'OUTPUT'` must have zero outgoing edges ($\text{outdegree} = 0$). Offending edges emit `OUTPUT_HAS_OUTGOING_EDGE` targeting `['edges', edgeIndex, 'source']`.
+      - Compound Violations: An edge directly linking `OUTPUT` to `INPUT` (`OUTPUT -> INPUT`) emits two distinct issues in deterministic order: `OUTPUT_HAS_OUTGOING_EDGE` at `['edges', edgeIndex, 'source']`, followed by `INPUT_HAS_INCOMING_EDGE` at `['edges', edgeIndex, 'target']`.
+    - Multiple Nodes Support: Workflows with multiple entry `INPUT` nodes and multiple terminal `OUTPUT` nodes are supported cleanly.
+    - Invariant & Compatibility Boundary: `validateWorkflowGraphSemantics` remains unchanged and permissive of non-terminal OUTPUTs or incoming INPUT edges when reachability holds. `validateWorkflowEntryExitTopology` provides the strict boundary contract required for execution.
+    - Success Payload: On success, returns `{ success: true, issues: [], topologicalNodeIds: string[] }`, preserving the deterministic topological sort order from the semantic prerequisite analysis.
+  - Diagnostic & Result Types: `WorkflowEntryExitTopologyIssueCode`, `WorkflowEntryExitTopologyIssue`, `WorkflowEntryExitTopologySuccessResult`, `WorkflowEntryExitTopologyIntegrityFailureResult`, `WorkflowEntryExitTopologySemanticFailureResult`, `WorkflowEntryExitTopologyFailureResult`, `WorkflowEntryExitTopologyResult`.
+  - Algorithmic Complexity: $\mathcal{O}(V + E)$ linear time after semantic gating.
+- **Verification**: `[AGENT-LOCAL]`
+  - 47 Vitest runtime tests in `packages/workflow-core/test/entry-exit-topology.spec.ts` passing (covering valid single/multi-entry/exit graphs, incoming edges on INPUT, outgoing edges on OUTPUT, compound direct edges, prerequisite failure preservation, frozen immutability, determinism, and TypeScript type narrowing).
+  - 262 total Vitest tests in `@flowforge/workflow-core` across 5 test files passing.
+  - 440 Vitest tests in `@flowforge/contracts` across 12 files passing.
+  - 4 Vitest tests in `@flowforge/api` across 2 files passing.
+  - 1 Vitest smoke test in `@flowforge/worker` passing.
+  - Total monorepo test baseline: 707 tests passing across 20 test files.
+- **Commit Status**: Preserved in working tree (developer-controlled commits).
+
+---
+
+### Milestone 2B-D2 — Branch-Conditioned Node-Output Path Coverage Analysis
+
+- **Date**: 2026-11-09
+- **Status**: `COMPLETED`
+- **Scope**: Extend `@flowforge/workflow-core` with branch-conditioned node-output path coverage analysis (`analyzeWorkflowNodeOutputPathCoverage`). Implemented staged prerequisite gating (Stage 1 reusing `validateWorkflowEntryExitTopology`, Stage 2 reusing `validateWorkflowNodeOutputReferences`), static graph path-dominance analysis relative to all workflow INPUT entrypoints, producer-exclusion forward BFS reachability ($O(V + E + R + P(V + E))$), occurrence-level advisory control-flow findings (`NODE_OUTPUT_REFERENCE_NOT_ON_ALL_INPUT_PATHS`), and multi-input root support.
+- **Files Created**:
+  - `packages/workflow-core/src/node-output-path-coverage.ts`
+  - `packages/workflow-core/test/node-output-path-coverage.spec.ts`
+- **Files Modified**:
+  - `packages/workflow-core/src/index.ts`
+  - `packages/workflow-core/src/node-output-references.ts`
+  - `README.md`
+  - `DEVELOPMENT_PLAN.md`
+  - `DEVELOPMENT_LOG.md`
+  - `CHANGELOG.md`
+- **Deliverables**:
+  - `analyzeWorkflowNodeOutputPathCoverage(graph: WorkflowGraph): WorkflowNodeOutputPathCoverageResult`: Staged branch-conditioned path coverage analyzer.
+    - Stage 1 Prerequisite Gating: Reuses `validateWorkflowEntryExitTopology(graph)` directly. Preserves integrity (`stage: 'integrity'`), semantics (`stage: 'semantics'`), and boundary topology (`stage: 'entry_exit'`) failure diagnostics without speculative evaluation.
+    - Stage 2 Prerequisite Gating: Reuses `validateWorkflowNodeOutputReferences(graph)`. Preserves node configuration (`stage: 'configuration'`) and reference lineage (`stage: 'references'`) diagnostics without speculative evaluation.
+    - Stage 3 Path Dominance Analysis:
+      - Path Dominance Definition: Producer node $P$ dominates consumer node $C$ relative to workflow INPUT entrypoints if every directed path beginning at ANY `INPUT` node and ending at $C$ contains $P$.
+      - Producer-Exclusion Algorithm: For each distinct referenced producer $P$, performs forward BFS traversal starting from all `INPUT` nodes except $P$. If $C$ is reached without $P$, emits an advisory finding for that reference.
+      - Intra-call Reachability Caching: Computes and caches reachability sets per distinct producer $P$ ($O(V + E)$ per producer, bounded by $P(V + E)$).
+      - Occurrence-Level Diagnostic Preservation: Generates findings per reference occurrence without collapsing or sorting messages by text.
+      - Advisory Nature: Findings represent control-flow branching risks, NOT hard structural errors or publication blockers. Returns `{ success: true, issues: [], findings: [...] }` without speculative readiness verdicts (`isPublishable`, `canRun`).
+  - Diagnostic & Result Types: `NodeOutputPathCoverageFindingCode`, `NodeOutputPathCoverageFinding`, `WorkflowNodeOutputPathCoverageSuccessResult`, `WorkflowNodeOutputPathCoverageIntegrityFailureResult`, `WorkflowNodeOutputPathCoverageSemanticFailureResult`, `WorkflowNodeOutputPathCoverageEntryExitFailureResult`, `WorkflowNodeOutputPathCoverageConfigurationFailureResult`, `WorkflowNodeOutputPathCoverageReferencesFailureResult`, `WorkflowNodeOutputPathCoverageResult`.
+  - Algorithmic Complexity: $\mathcal{O}(V + E + R + P(V + E))$ for the path coverage pass, with space complexity bounded by $\mathcal{O}(V + E + PV)$.
+- **Verification**: `[AGENT-LOCAL]`
+  - 60 Vitest runtime tests in `packages/workflow-core/test/node-output-path-coverage.spec.ts` passing (covering dominating linear pipelines, shared branch producers, branch-confined references, multiple inputs/outputs, conditional merges, optional side paths, distinct producers, occurrence preservation, prerequisite failures, determinism, frozen immutability, and TypeScript discriminated union narrowing).
+  - 322 total Vitest tests in `@flowforge/workflow-core` across 6 test files passing.
+  - 440 Vitest tests in `@flowforge/contracts` across 12 files passing.
+  - 4 Vitest tests in `@flowforge/api` across 2 files passing.
+  - 1 Vitest smoke test in `@flowforge/worker` passing.
+  - Total monorepo test baseline: 767 tests passing across 21 test files.
+- **Commit Status**: Preserved in working tree (developer-controlled commits).
+
+---
+
+### Milestone 2B-E — Unified Static Workflow Publish-Readiness Assessment
+
+- **Date**: 2026-11-09
+- **Status**: `COMPLETED`
+- **Scope**: Extend `@flowforge/workflow-core` with unified static workflow publish-readiness assessment (`validateWorkflowPublishReadiness`). Implemented a 5-stage validation pipeline on untrusted unknown inputs: Stage 1 structural schema parsing via `WorkflowGraphSchema.safeParse(input)` (safely sanitizing paths to `string | number` without leaking raw input payloads or `ZodError` instances), Stage 2 graph integrity, semantics, and boundary topology via `validateWorkflowEntryExitTopology`, Stage 3 node configuration validation via `validateWorkflowNodeConfigs`, Stage 4 static reference validation combining `validateWorkflowNodeOutputReferences` and `validateWorkflowInputReferences` without early-halting, and Stage 5 static path coverage advisories via `analyzeWorkflowNodeOutputPathCoverage`. Emits discriminated public statuses (`blocked`, `checks_passed_with_advisories`, `checks_passed`), stage-tagged blocking issues, and non-blocking advisories. Decoupled from database persistence, authorization, publishing endpoints, and runtime execution. Phase 2B is feature-complete.
+- **Files Created**:
+  - `packages/workflow-core/src/publish-readiness.ts`
+  - `packages/workflow-core/test/publish-readiness.spec.ts`
+- **Files Modified**:
+  - `packages/workflow-core/src/index.ts`
+  - `README.md`
+  - `DEVELOPMENT_PLAN.md`
+  - `DEVELOPMENT_LOG.md`
+  - `CHANGELOG.md`
+- **Deliverables**:
+  - `validateWorkflowPublishReadiness(input: unknown): WorkflowPublishReadinessResult`: Pure static readiness gateway orchestrating the 5-stage validation pipeline.
+    - Stage 1 (Structure): Parses untrusted payload with `WorkflowGraphSchema.safeParse(input)`. If malformed, halts immediately returning `status: 'blocked'` with `stage: 'structure'` diagnostic issues.
+    - Stage 2 (Topology & Semantics): Reuses `validateWorkflowEntryExitTopology(graph)` directly. Preserves structural integrity (`stage: 'integrity'`), branch semantics / reachability (`stage: 'semantics'`), and entry/terminal boundary (`stage: 'entry_exit'`) failure diagnostics without speculative evaluation.
+    - Stage 3 (Configuration): Reuses `validateWorkflowNodeConfigs(graph)` from `@flowforge/contracts`. If any configured node violates its typed schema, halts immediately returning `status: 'blocked'` with `stage: 'configuration'` issues.
+    - Stage 4 (Static References): Runs both `validateWorkflowNodeOutputReferences(graph)` and `validateWorkflowInputReferences(graph)` independently. If either or both fail, halts returning `status: 'blocked'` with aggregated issues in deterministic sequence (`stage: 'node_output_references'` followed by `stage: 'input_references'`).
+    - Stage 5 (Path Coverage Advisories): Runs `analyzeWorkflowNodeOutputPathCoverage(graph)`. If advisory path-dominance findings exist, returns `status: 'checks_passed_with_advisories'` with populated `advisories` and `topologicalNodeIds` (`blockingIssues: []`). If zero findings exist, returns `status: 'checks_passed'` with empty `blockingIssues` and `advisories`.
+  - Public Types: `WorkflowPublishReadinessStatus`, `WorkflowStructuralIssue`, `WorkflowIntegrityBlockingIssue`, `WorkflowSemanticBlockingIssue`, `WorkflowEntryExitBlockingIssue`, `WorkflowConfigurationBlockingIssue`, `WorkflowNodeOutputReferenceBlockingIssue`, `WorkflowInputReferenceBlockingIssue`, `WorkflowPublishReadinessBlockingIssue`, `WorkflowPublishReadinessAdvisory`, `WorkflowPublishReadinessBlockedResult`, `WorkflowPublishReadinessPassedWithAdvisoriesResult`, `WorkflowPublishReadinessPassedResult`, `WorkflowPublishReadinessResult`.
+  - Pure Function Boundary: Accepts `unknown` input, performs no side effects, does not mutate inputs, and maintains complete decoupling from database persistence, publishing endpoints, worker dispatch, and runtime execution.
+- **Verification**: `[AGENT-LOCAL]`
+  - 67 Vitest runtime tests in `packages/workflow-core/test/publish-readiness.spec.ts` passing (covering Stage 1 structural failures, Stage 2 topology/semantic failures, Stage 3 configuration failures, Stage 4 reference failures, dual reference failure aggregation, Stage 5 advisory outcomes, pristine passed outcomes, untrusted payload types, determinism, frozen immutability, and TypeScript discriminated union narrowing).
+  - 389 total Vitest tests in `@flowforge/workflow-core` across 7 test files passing.
+  - 440 Vitest tests in `@flowforge/contracts` across 12 files passing.
+  - 4 Vitest tests in `@flowforge/api` across 2 files passing.
+  - 1 Vitest smoke test in `@flowforge/worker` passing.
+  - Total monorepo test baseline: 834 tests passing across 22 test files.
+- **Commit Status**: Preserved in working tree (developer-controlled commits).
+
+---
+
 ## 4. Upcoming Work
 
-### Phase 2B — Workflow Graph Core (`packages/workflow-core`)
+### Phase 2C — Database & Persistence (`packages/database`)
 
 - **Status**: `NOT STARTED`
-- **Scope**: Create framework-independent domain package `@flowforge/workflow-core`. Implement pure DAG algorithms (cycle detection via Kahn's algorithm, connectivity checks, reachability, condition branch completeness, topological sorting) and execution state machine primitives.
+- **Scope**: Configure PostgreSQL connection and initialize Prisma ORM in a dedicated `@flowforge/database` workspace package. Implement domain models (`User`, `Workspace`, `WorkspaceMember`, `Workflow`, `WorkflowVersion`, `Execution`, `NodeExecution`, `ExecutionEvent`, `ApprovalRequest`, `OutboxEvent`), reproducible Prisma migrations, seed scripts, and typed repository clients.
 
 ---
 

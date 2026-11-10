@@ -23,9 +23,9 @@ The FlowForge AI architecture adheres to nine foundational engineering principle
 
 ---
 
-## 2. Current Implemented Architecture (Milestone 1E-C Baseline)
+## 2. Current Implemented Architecture (Phase 2B Baseline)
 
-The repository currently provides the verified Phase 1 Engineering Foundation. No business features, database connections, or message queues have been connected yet.
+The repository provides the verified Phase 1 Engineering Foundation, Phase 2A Shared Contracts & Node Configurations, and Phase 2B Workflow Graph Core & DAG Analysis. No business features, database connections, message queues, publishing endpoints, or execution engines have been connected yet.
 
 ```mermaid
 flowchart LR
@@ -38,11 +38,13 @@ flowchart LR
         end
 
         subgraph Packages["Shared Packages (packages/)"]
-            CONTRACTS["@flowforge/contracts<br/>TypeScript Declarations<br/>(HealthResponse)"]
+            CONTRACTS["@flowforge/contracts<br/>Zod 4 Schemas & DTOs<br/>(WorkflowGraph, NodeConfigs)"]
+            WORKFLOW_CORE["@flowforge/workflow-core<br/>Pure DAG Engine & Diagnostics<br/>(Publish-Readiness)"]
         end
     end
 
     API -->|workspace:*| CONTRACTS
+    WORKFLOW_CORE -->|workspace:*| CONTRACTS
 ```
 
 ### 2.1 Implemented & Verified Components
@@ -50,15 +52,32 @@ flowchart LR
 - **`apps/web`**: Next.js 16.4.5 App Router application with React 19.3.1. Serves a static homepage foundation on port 3000. Verified via Next.js Turbopack production builds, TypeScript checking, and ESLint.
 - **`apps/api`**: NestJS 12.3.2 application operating under NodeNext ESM on port 4000. Configured with a global route prefix (`api/v1`). Exposes `GET /api/v1/health`. Verified via Vitest HTTP integration tests (Supertest) and dependency injection metadata tests.
 - **`apps/worker`**: Standalone Node.js 26 background process scaffold with NodeNext ESM. Verified via child-process smoke tests asserting stdout diagnostic output, empty stderr, and zero exit code.
-- **`packages/contracts`**: Framework-independent shared contract package exporting `HealthResponse`. Verified via compile-time type constraint testing with `@ts-expect-error`.
+- **`packages/contracts`**: Framework-independent shared contract package exporting:
+  - System health probe contracts (`HealthResponse`).
+  - Workflow graph structural contracts (`WorkflowNodeTypeSchema`, `WorkflowNodeSchema`, `WorkflowEdgeSchema`, `WorkflowGraphSchema`, `WorkflowIdentifierSchema`).
+  - Discriminated value bindings (`LiteralBindingSchema`, `InputValueReferenceSchema`, `NodeOutputValueReferenceSchema`, `ValueBindingSchema`).
+  - Seven typed node-specific configuration schemas (`INPUT`, `OUTPUT`, `TRANSFORM`, `CONDITION`, `LLM`, `MCP_TOOL`, `APPROVAL`).
+  - Discriminated configured node union (`ConfiguredWorkflowNodeSchema`, `ConfiguredWorkflowNode`).
+  - Workflow-level node configuration validation and diagnostics (`validateNodeConfig`, `validateWorkflowNodeConfigs`, `formatValidationPath`).
+  - Verified via 440 Vitest runtime schema tests and compile-time type constraint testing (`@ts-expect-error`).
+- **`packages/workflow-core`**: Standalone, framework-independent pure DAG analysis and static validation engine exporting:
+  - Graph structural integrity and deterministic topological sorting (`analyzeWorkflowGraph`).
+  - CONDITION branch rules and static forward/reverse reachability (`validateWorkflowGraphSemantics`).
+  - Strict entry/terminal boundary topology (`validateWorkflowEntryExitTopology`).
+  - Static node-output reference lineage and reverse DAG ancestry (`validateWorkflowNodeOutputReferences`).
+  - Workflow-wide trigger input reference scope and ambiguity validation (`validateWorkflowInputReferences`).
+  - Branch-conditioned node-output path coverage and advisory dominance analysis (`analyzeWorkflowNodeOutputPathCoverage`).
+  - Unified static publish-readiness assessment orchestrating the 5-stage validation pipeline (`validateWorkflowPublishReadiness`).
+  - Verified via 389 Vitest runtime unit and integration tests across 7 test files.
 - **Tooling & Orchestration**: pnpm 12.16.1 workspaces, Turborepo 2.11.10 task pipeline, TypeScript 6.0.3 strict base, ESLint 10.14.0 flat config, and Prettier 3.9.10.
 
 ### 2.2 Current Limitations (What Is NOT Yet Implemented)
 
-- **Database**: No PostgreSQL connection, Prisma schema, or persistence layer exists.
-- **Queue / Cache**: No Redis connection or BullMQ queue integration exists.
-- **Authentication**: No user accounts, sessions, or JWT verification exist.
-- **Workflow Engine**: No DAG parser, visual canvas, or execution runtime exists.
+- **Database**: No PostgreSQL connection, Prisma schema, or persistence layer exists (`packages/database` will be implemented in Phase 2C).
+- **Queue / Cache**: No Redis connection or BullMQ queue integration exists (deferred to Phase 3).
+- **Authentication & Workspace Scoping**: No user accounts, sessions, JWT verification, or workspace membership checks exist (Phase 2C).
+- **Workflow Publishing Endpoints & Version Persistence**: No HTTP endpoints for saving/publishing workflows (`POST /api/v1/workflows/:id/publish`), database transactions, or immutable version snapshotting exist. `validateWorkflowPublishReadiness` provides pure design-time static assessment only.
+- **Workflow Execution**: No DAG execution runtime, worker task dispatch, LLM provider calls, MCP connections, or state machine exists.
 - **Inter-service Communication**: `apps/web` does not yet call `apps/api`.
 
 ---

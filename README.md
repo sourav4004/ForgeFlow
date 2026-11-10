@@ -18,7 +18,8 @@ The repository has completed foundational setup, core application scaffolding, s
 - Node-specific configuration schemas for all 7 approved V1 node kinds (`INPUT`, `TRANSFORM`, `CONDITION`, `LLM`, `MCP_TOOL`, `APPROVAL`, `OUTPUT`).
 - Typed workflow node composition and discriminated union (`ConfiguredWorkflowNodeSchema`, `ConfiguredWorkflowNode`) uniting all seven fully configured node variants with strict schema validation, type narrowing, JSON serializability consistency, and complete preservation of draft compatibility.
 - Workflow-level node configuration validation and editor-ready diagnostics (`validateNodeConfig`, `validateWorkflowNodeConfigs`, `formatValidationPath`) collecting all configuration issues across draft graphs without short-circuiting, preserving exact node IDs, indices, and structured error paths.
-- Automated testing infrastructure across API (Vitest + Supertest + SWC metadata), worker (compiled process smoke testing), and shared contracts (Vitest runtime schema suites + compile-time type constraints).
+- Standalone workflow graph analysis package (`@flowforge/workflow-core`) implementing staged integrity validation (ID uniqueness, edge endpoints, directed cycle detection via Kahn's algorithm) and deterministic topological ordering with $O((V + E) \log V)$ lexicographic tie-breaking.
+- Automated testing infrastructure across API (Vitest + Supertest + SWC metadata), worker (compiled process smoke testing), shared contracts (Vitest runtime schema suites + compile-time type constraints), and workflow-core (Vitest DAG analysis suite).
 
 ## Repository Structure
 
@@ -29,7 +30,8 @@ flowforge-ai/
 │   ├── web/            # Next.js frontend application (@flowforge/web, port 3000)
 │   └── worker/         # Background worker process foundation (@flowforge/worker)
 ├── packages/           # Shared libraries and domain packages
-│   └── contracts/      # Shared contracts & DTOs (@flowforge/contracts)
+│   ├── contracts/      # Shared contracts, DTOs & schemas (@flowforge/contracts)
+│   └── workflow-core/  # Pure workflow graph analysis & DAG engine (@flowforge/workflow-core)
 ├── docs/               # Architecture documents and ADRs
 │   └── adr/            # Architecture Decision Records
 ├── tests/              # Multi-package test suites
@@ -103,9 +105,58 @@ The `@flowforge/contracts` package provides framework-agnostic TypeScript contra
 - **Test**: `pnpm --filter @flowforge/contracts test` (compiles declarations, runs compile-time type tests, and executes Vitest runtime schema tests)
 - **Lint**: `pnpm --filter @flowforge/contracts lint`
 
+## Workflow Core Package
+
+The `@flowforge/workflow-core` package provides pure, framework-independent workflow graph analysis algorithms and deterministic topological ordering:
+
+- **Public APIs**:
+  - `analyzeWorkflowGraph(graph: WorkflowGraph): GraphAnalysisResult`: Pure, synchronous function evaluating graph integrity (duplicate node/edge IDs, missing endpoints, directed cycle detection via Kahn's algorithm) and calculating deterministic topological ordering. Note: Two parallel edges between identical nodes with distinct edge IDs remain structurally valid at the integrity analyzer layer. Combined complexity includes binary min-heap topological priority-queue costs ($O((V + E) \log V)$).
+  - `validateWorkflowGraphSemantics(graph: WorkflowGraph): WorkflowGraphSemanticsResult`: Staged semantic validator ensuring workflow graphs meet branch integrity and static reachability rules before downstream processing:
+    - _Integrity Gating_: Reuses `analyzeWorkflowGraph` first; if structural/topological defects exist, immediately returns `{ success: false, stage: 'integrity', issues }` without emitting misleading reachability errors.
+    - _Entry & Terminal Presence_: Requires at least one `INPUT` node and at least one `OUTPUT` node (`MISSING_INPUT_NODE`, `MISSING_OUTPUT_NODE`).
+    - _CONDITION Branch Rules_: Requires each `CONDITION` node to have exactly two outgoing edges: one `TRUE` and one `FALSE` branch (`CONDITION_TRUE_BRANCH_MISSING`, `CONDITION_FALSE_BRANCH_MISSING`, `CONDITION_OUTCOME_DUPLICATE`, `CONDITION_EDGE_OUTCOME_MISSING`, `CONDITION_EXTRA_OUTGOING_EDGE`).
+    - _Non-Condition Edges_: Strictly forbids `conditionOutcome` metadata on edges originating from non-CONDITION nodes (`NON_CONDITION_EDGE_OUTCOME`).
+    - _Static Forward Reachability_: Every node must be reachable from at least one `INPUT` node along directed edges (`UNREACHABLE_FROM_INPUT`). The traversal itself is $O(V + E)$, but the complete staged validator includes Stage 1 heap-based topological sorting.
+    - _Static Reverse Reachability_: Every node must be able to reach at least one `OUTPUT` node along directed edges (`CANNOT_REACH_OUTPUT`).
+  - `validateWorkflowNodeOutputReferences(graph: WorkflowGraph): WorkflowNodeOutputReferenceValidationResult`: Staged static reference validator verifying that all inspectable `source: 'node_output'` references target existing, strictly upstream DAG ancestors:
+    - _Stage 1 (Graph Integrity)_: Reuses `analyzeWorkflowGraph(graph)` to guarantee acyclicity and topological integrity.
+    - _Stage 2 (Configuration Validity)_: Reuses `validateWorkflowNodeConfigs(graph)` to ensure node configurations and binding shapes are structurally valid.
+    - _Stage 3 (Node-Output Reference Lineage)_: Extracts references from approved typed binding positions and verifies target node existence (`NODE_OUTPUT_REFERENCE_NOT_FOUND`), rejects self-references (`NODE_OUTPUT_REFERENCE_SELF`), and checks strict reverse DAG ancestry (`NODE_OUTPUT_REFERENCE_NOT_UPSTREAM`).
+    - _Security & Privacy Model_: Authored identifiers, property paths, and mapping keys legitimately appear in diagnostic paths and messages. Callers must treat diagnostics as potentially sensitive and avoid indiscriminate logging. Raw configs, prompts, and secrets are never copied into diagnostics.
+    - _Conditional Branch Boundary_: Static ancestry verifies DAG connectivity, but does not guarantee runtime execution availability when conditional branches (`CONDITION` true/false) skip upstream paths.
+  - `validateWorkflowInputReferences(graph: WorkflowGraph): WorkflowInputReferenceValidationResult`: Staged static trigger input reference validator verifying that all inspectable `source: 'input'` references resolve against declared fields across configured `INPUT` nodes:
+    - _Stage 1 (Graph Integrity)_: Reuses `analyzeWorkflowGraph(graph)` to guarantee structural and topological integrity.
+    - _Stage 2 (Configuration Validity)_: Reuses `validateWorkflowNodeConfigs(graph)` to ensure node configurations and binding shapes are structurally valid.
+    - _Stage 3 (Input Reference Scope)_: Resolves references against a unified workflow-level input namespace. Enforces exact case-sensitive field identity, emitting `INPUT_REFERENCE_FIELD_NOT_FOUND` if undeclared, and `INPUT_REFERENCE_FIELD_AMBIGUOUS` if declared across multiple `INPUT` nodes. Unreferenced duplicate fields do not trigger ambiguity errors.
+    - _Namespace & Ancestry Boundary_: Input reference scope is workflow-wide and does not require directed graph ancestry between the declaring `INPUT` node and the consuming node. Static resolution verifies declaration existence, not runtime value presence or invocation payloads.
+    - _Separation of Concerns_: `validateWorkflowInputReferences` and `validateWorkflowNodeOutputReferences` remain distinct, single-responsibility validators without cross-coupling.
+  - `validateWorkflowEntryExitTopology(graph: WorkflowGraph): WorkflowEntryExitTopologyResult`: Staged static entry/terminal boundary topology validator ensuring `INPUT` and `OUTPUT` nodes fulfill DAG boundary rules:
+    - _Prerequisite Gating_: Reuses `validateWorkflowGraphSemantics(graph)` directly, which internally runs graph integrity checks. Preserves structural/topological failures (`stage: 'integrity'`) and semantic failures (`stage: 'semantics'`) without duplicate topological sort computations.
+    - _Rule A (Zero-Indegree INPUT)_: Every node with `type: 'INPUT'` must have zero incoming edges ($\text{indegree} = 0$). Offending edges emit `INPUT_HAS_INCOMING_EDGE` targeting `['edges', edgeIndex, 'target']`.
+    - _Rule B (Zero-Outdegree OUTPUT)_: Every node with `type: 'OUTPUT'` must have zero outgoing edges ($\text{outdegree} = 0$). Offending edges emit `OUTPUT_HAS_OUTGOING_EDGE` targeting `['edges', edgeIndex, 'source']`.
+    - _Compound Violations_: Edges directly linking `OUTPUT` to `INPUT` deterministically emit both `OUTPUT_HAS_OUTGOING_EDGE` and `INPUT_HAS_INCOMING_EDGE` in edge-index sequence.
+    - _Deterministic Topological Ordering_: Returns `{ success: true, issues: [], topologicalNodeIds }` preserving deterministic topological ordering upon passing.
+    - _Multi-Tier Compatibility_: `validateWorkflowGraphSemantics` remains unchanged and permissive of non-terminal OUTPUTs or non-entry INPUTs as long as reachability holds; `validateWorkflowEntryExitTopology` provides the strict boundary contract required for execution.
+  - `analyzeWorkflowNodeOutputPathCoverage(graph: WorkflowGraph): WorkflowNodeOutputPathCoverageResult`: Staged static branch-conditioned path coverage analyzer detecting when a valid node-output reference does not lie on every directed path from workflow INPUT entrypoints to the consumer:
+    - _Prerequisite Gating_: Staged gating reuses `validateWorkflowEntryExitTopology` (integrity, semantics, entry/terminal boundary) and `validateWorkflowNodeOutputReferences` (node configuration and strict DAG ancestry). Halts immediately preserving original stage and diagnostic issues on any prerequisite failure.
+    - _Path Dominance Definition_: Producer node $P$ dominates consumer node $C$ relative to INPUT entrypoints if every directed path from ANY `INPUT` node to $C$ contains $P$.
+    - _Producer-Exclusion Traversal_: For each distinct referenced producer $P$, performs forward BFS reachability excluding $P$ starting from all `INPUT` nodes except $P$. If $C$ remains reachable without $P$, an advisory finding (`NODE_OUTPUT_REFERENCE_NOT_ON_ALL_INPUT_PATHS`) is emitted for that reference occurrence.
+    - _Advisory Nature vs. Hard Error_: Findings indicate static control-flow risk (e.g. conditional branch skipping or optional bypasses), NOT absolute execution errors or automatic publication blockers. Returns `{ success: true, issues: [], findings: [...] }` without speculative publishability or runtime safety flags (`isPublishable`, `canRun`).
+    - _Algorithmic Complexity_: Adjacency construction is $O(V + E)$; reference inspection is $O(R)$; each distinct referenced producer $P$ incurs an $O(V + E)$ forward reachability traversal ($O(V + E + R + P(V + E))$ total for the path coverage pass, alongside prerequisite validator costs).
+    - _Diagnostic Sensitivity_: Authored identifiers and property paths legitimately appear in diagnostic paths and messages. Callers must treat diagnostics as potentially sensitive and avoid indiscriminate telemetry logging. Raw payloads, prompts, credentials, and secrets are never copied into findings.
+- **Integrity-First Staged Analysis**:
+  - _Stage A_: Validates node and edge identifier uniqueness with exact string equality (preserving case and punctuation).
+  - _Stage B_: Validates edge referential integrity (sources and targets exist in graph). If any Stage A or B issues are detected, immediately returns failure to prevent misleading cycle diagnoses.
+  - _Stage C_: Executes Kahn's topological sort algorithm with a zero-dependency binary min-heap for deterministic tie-breaking ($O((V + E) \log V)$), selecting the lexicographically smallest node ID when multiple zero-indegree nodes are ready.
+- **Pure Function Boundary**: Synchronous, free of side effects, does not mutate input graphs, and supports draft nodes (`config: {}`). Static reachability and ancestry are decoupled from runtime condition execution, join scheduling, and publication snapshotting.
+- **Build**: `pnpm --filter @flowforge/workflow-core build`
+- **Typecheck**: `pnpm --filter @flowforge/workflow-core typecheck`
+- **Test**: `pnpm --filter @flowforge/workflow-core test`
+- **Lint**: `pnpm --filter @flowforge/workflow-core lint`
+
 ### Monorepo Boundaries
 
-Applications and worker processes in the monorepo must not directly import internal source files or implementations across application boundaries. All shared data types and contract definitions must reside in shared packages such as `@flowforge/contracts`. Downstream packages consume contracts through workspace dependencies (`@flowforge/contracts: workspace:*`) with Turborepo ensuring upstream declaration compilation precedes downstream typechecking and builds (`dependsOn: ["^build"]`).
+Applications and worker processes in the monorepo must not directly import internal source files or implementations across application boundaries. All shared data types and contract definitions must reside in shared packages such as `@flowforge/contracts` and `@flowforge/workflow-core`. Downstream packages consume contracts through workspace dependencies (`@flowforge/contracts: workspace:*`, `@flowforge/workflow-core: workspace:*`) with Turborepo ensuring upstream declaration compilation precedes downstream typechecking and builds (`dependsOn: ["^build"]`).
 
 ## Automated Testing
 
@@ -115,6 +166,7 @@ Automated testing is configured using [Vitest](https://vitest.dev):
 - **Run API E2E Tests**: `pnpm --filter @flowforge/api test:e2e`
 - **Run Worker Smoke Tests**: `pnpm --filter @flowforge/worker test` (builds and executes compiled process smoke testing)
 - **Run Contracts Tests**: `pnpm --filter @flowforge/contracts test` (compiles declarations, executes compile-time type tests, and runs Vitest runtime schema tests)
+- **Run Workflow Core Tests**: `pnpm --filter @flowforge/workflow-core test` (compiles declarations, executes compile-time type checks, and runs Vitest DAG analysis tests)
 - **Monorepo Test Pipeline**: `pnpm run test` (executes Turborepo test task across configured packages with dependencies built first)
 
 ### Testing Approaches
@@ -124,6 +176,7 @@ Automated testing is configured using [Vitest](https://vitest.dev):
 - **Shared Contracts Dual Testing**:
   - _Compile-Time Type Tests_: Uses native `tsc --noEmit -p tsconfig.test.json` with `@ts-expect-error` directives to verify contract shape, property requirements, and readonly constraints directly against the public package entrypoint.
   - _Runtime Schema Tests_: Uses Vitest (`packages/contracts/test/workflow-schema.spec.ts`) to validate positive parsing, structural data preservation, and negative rejections (unknown node kinds, empty/whitespace IDs, non-finite positions, non-JSON configs, extra keys).
+- **Workflow Core Graph Analysis & Boundary Topology Testing**: Uses Vitest (`packages/workflow-core/test`) to validate DAG algorithms, deterministic lexicographic ordering, parallel edge handling, cycle detection, CONDITION branch rules, static reachability, node-output ancestor integrity, input field reference scope, entry/terminal boundary topology, and branch-conditioned path coverage across 322 test cases.
 
 ## Continuous Integration
 
@@ -149,35 +202,8 @@ The single `quality-and-tests` job validates the entire engineering foundation w
    - `pnpm --filter @flowforge/api typecheck:test`
    - `pnpm --filter @flowforge/worker typecheck:test`
    - `pnpm --filter @flowforge/contracts typecheck:test`
-8. **Automated Test Suite**: `pnpm run test` (API unit/e2e tests, worker process smoke test, contracts compile-time tests)
-
-Developers can execute these exact commands locally in sequence to reproduce CI validation.
-
-## Continuous Integration
-
-Automated continuous integration is defined in [`.github/workflows/ci.yml`](./.github/workflows/ci.yml) and executes on Ubuntu runners (`ubuntu-latest`) using Node.js 26 and pnpm 12.
-
-### CI Workflow Triggers
-
-- `push` to `main`
-- `pull_request` targeting `main`
-- Manual trigger via `workflow_dispatch`
-
-### Executed Verification Pipeline
-
-The single `quality-and-tests` job validates the entire engineering foundation with read-only repository permissions (`contents: read`):
-
-1. **Frozen Dependency Installation**: `pnpm install --frozen-lockfile`
-2. **Code Formatting Check**: `pnpm run format:check`
-3. **Root ESLint Check**: `pnpm run lint:root`
-4. **Workspace ESLint Check**: `pnpm run lint`
-5. **Workspace Package Build**: `pnpm run build`
-6. **Workspace Production Typecheck**: `pnpm run typecheck`
-7. **Test Configuration Typechecks**:
-   - `pnpm --filter @flowforge/api typecheck:test`
-   - `pnpm --filter @flowforge/worker typecheck:test`
-   - `pnpm --filter @flowforge/contracts typecheck:test`
-8. **Automated Test Suite**: `pnpm run test` (API unit/e2e tests, worker process smoke test, contracts compile-time tests)
+   - `pnpm --filter @flowforge/workflow-core typecheck:test`
+8. **Automated Test Suite**: `pnpm run test` (API unit/e2e tests, worker process smoke test, contracts tests, workflow-core DAG analysis tests)
 
 Developers can execute these exact commands locally in sequence to reproduce CI validation.
 

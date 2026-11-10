@@ -58,5 +58,8 @@ jobs:
       - name: Typecheck contracts tests
         run: pnpm --filter @flowforge/contracts typecheck:test
 
+      - name: Typecheck workflow-core tests
+        run: pnpm --filter @flowforge/workflow-core typecheck:test
+
       - name: Run automated test suite
         run: pnpm run test
